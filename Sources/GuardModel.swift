@@ -26,9 +26,9 @@ struct GuardConfiguration: Codable, Equatable, Sendable {
     }
 
     var problem: GuardText? {
-        if !Self.validIPv4(peer) { return GuardText("Enter the VPN node’s numeric IPv4 address.") }
+        if !Self.validIPv4(peer) { return GuardText("Enter a valid numeric node address.") }
         if ["1.1.1.1", "1.0.0.1"].contains(peer) { return GuardText("The node address must be different from both health probes.") }
-        if !Self.validIPv4(exit) { return GuardText("Enter the approved public IPv4 exit.") }
+        if !Self.validIPv4(exit) { return GuardText("Enter a valid numeric exit address.") }
         if let value = UInt16(port), value > 0, String(value) == port { }
         else { return GuardText("Enter the node port (1–65535).") }
         if !["tcp", "udp"].contains(transport) { return GuardText("Select the node transport.") }
@@ -199,15 +199,15 @@ final class GuardController: ObservableObject {
     init(preview: Bool = false) {
         self.preview = preview
         if preview {
-            configuration = GuardConfiguration(peer: "198.51.100.42", port: "443", expected: "198.51.100.42", interface: "utun6")
+            configuration = GuardConfiguration(port: "443", interface: "utun6")
             events = [
                 GuardEvent(at: Date().addingTimeInterval(-46), state: "OPEN", text: GuardCopy.reason("stable-open").zh,
-                           english: GuardCopy.reason("stable-open").en, ip: "198.51.100.42"),
+                           english: GuardCopy.reason("stable-open").en, ip: nil),
                 GuardEvent(at: Date().addingTimeInterval(-64), state: "LOCKED", text: GuardCopy.reason("settling").zh,
-                           english: GuardCopy.reason("settling").en, ip: "198.51.100.42"),
+                           english: GuardCopy.reason("settling").en, ip: nil),
             ]
             check = LocalCheck(system: "macOS", defaultInterface: "utun6", tunnels: ["utun6"], vpnConnected: true, pfPresent: true)
-            let demo = "demo|OPEN|" + String(Date().timeIntervalSince1970) + "|utun6|198.51.100.42|198.51.100.42|stable-open|0|live|1||198.51.100.42:443/tcp|" + GuardPolicy.id
+            let demo = "demo|OPEN|" + String(Date().timeIntervalSince1970) + "|utun6|-|-|stable-open|0|live|1|||" + GuardPolicy.id
             status = Snapshot(demo)
             reviewedTransports = [configuration.endpointKey: .reality]
             rates = TunnelRates(received: 126000, sent: 18400)
@@ -318,7 +318,7 @@ final class GuardController: ObservableObject {
         guard !active, !busy, !detectingEndpoint else { return }
         let host = configuration.peer
         guard GuardConfiguration.validIPv4(host) else {
-            notice = GuardText("Enter the VPS IPv4 address before looking for active connections.")
+            notice = GuardText("Enter the node address before looking for active connections.")
             return
         }
         endpointCandidates = []
@@ -334,7 +334,7 @@ final class GuardController: ObservableObject {
                 notice = GuardText("No Shadowrocket connection to this address was found. Connect the node, open an ordinary webpage, then try again.")
             } else {
                 endpointCandidates = candidates
-                notice = GuardText("Multiple connections match this IP. Select the port and protocol shown in the node details.")
+                notice = GuardText("Multiple connections match this node. Select the connection shown in the node details.")
             }
         }
     }
@@ -343,7 +343,7 @@ final class GuardController: ObservableObject {
         guard !active, !busy else { return }
         guard let text = NSPasteboard.general.string(forType: .string),
               let endpoint = DetectedEndpoint.parseShareLink(text) else {
-            notice = GuardText("Copy a single 3x-ui node link with a fixed IPv4 address, port, and supported transport, or detect an active connection.")
+            notice = GuardText("Copy a supported single-node link from 3x-ui or detect an active connection.")
             return
         }
         let evidence = TransportEvidence.inspect(text, endpoint: endpoint)
@@ -422,7 +422,7 @@ final class GuardController: ObservableObject {
             busy = false
             refresh()
             if result.code != 0 {
-                notice = GuardText("Recovery did not complete. Try again or restart the Mac mini to clear the session rules.")
+                notice = GuardText("Recovery did not complete. Try again or restart to clear the session rules.")
                 add("restore-error", GuardText("The administrator action could not be confirmed."))
             }
         }
@@ -534,7 +534,7 @@ final class GuardController: ObservableObject {
             GuardText("Approved exit ")[language] + (configuration.exit.isEmpty ? "—" : configuration.exit),
             GuardText("Transport profile ")[language] + currentTransport.title[language],
             GuardText("Evidence scope ")[language] +
-                GuardText("IPv4 exit through the selected tunnel; packet contents are not collected.")[language],
+                GuardText("The exit is checked through the selected tunnel. Packet contents are not collected.")[language],
             "",
         ] + rows).joined(separator: "\n")
         do { try body.write(to: url, atomically: true, encoding: .utf8) }

@@ -96,7 +96,7 @@ struct GuardWindow: View {
             Button(tr("Cancel"), role: .cancel) { startTrial = nil }
         } message: {
             Text(startTrial == true
-                 ? tr("Use the Mac mini locally. macOS will ask for administrator access and reset existing connections. Blocking remains in effect when the trial expires.")
+                 ? tr("Start the trial locally. macOS will ask for administrator access and reset existing connections. Blocking remains in effect when the trial expires.")
                  : tr("Enable the approved route and recheck its exit. App traffic stays blocked when the VPN is unavailable."))
         }
         .alert(tr("Restore network"), isPresented: $showRestore) {
@@ -278,14 +278,14 @@ struct GuardWindow: View {
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 12) {
-                        field(tr("VPS IPv4"), text: $controller.configuration.peer)
+                        field(tr("Node address"), text: $controller.configuration.peer)
                         field(tr("Node port"), text: $controller.configuration.port).frame(width: 110)
                         GuardDropdown(tr("Transport"), selection: $controller.configuration.transport,
                                       choices: ["tcp", "udp"], palette: palette) { $0.uppercased() }
                         .frame(width: 150)
                     }
                     HStack(spacing: 12) {
-                        field(tr("Approved exit IPv4 (defaults to VPS)"), text: $controller.configuration.expected)
+                        field(tr("Approved exit (defaults to node)"), text: $controller.configuration.expected)
                         GuardDropdown(tr("Tunnel"), selection: $controller.configuration.interface,
                                       choices: [""] + tunnelChoices, palette: palette) { $0.isEmpty ? tr("Select") : $0 }
                         .frame(width: 190)
@@ -319,16 +319,16 @@ struct GuardWindow: View {
                 Spacer()
             }
             layer(1, "wifi", tr("Local access"), tr("Physical interface"),
-                  tr("Wi-Fi or Ethernet provides local access and DHCP. Ordinary public IPv4, IPv6, and direct DNS are denied by default."),
+                  tr("Wi-Fi or Ethernet provides local access. The filter allows network maintenance and blocks ordinary direct traffic."),
                   tr("The fixed VPS is the public exception"))
             layer(2, "server.rack", tr("Pinned VPS connection"), tr("Outer transport"),
-                  tr("The local ISP carries the tunnel to one IPv4 address, port, and protocol. Shadowrocket and the VPS negotiate encryption."),
+                  tr("The local network carries the connection to the configured node. Shadowrocket and the server negotiate encryption."),
                   controller.currentTransport.title[language])
             layer(3, "lock.shield", tr("Approved tunnel"), tr("Service binding"),
                   tr("Reconnection is tied to the original Shadowrocket service. The candidate tunnel starts with exit probes while app traffic stays blocked."),
-                  tr("Tunnel IPv4 only · IPv6 blocked"))
+                  tr("Allow supported tunnel traffic only"))
             layer(4, "checkmark.circle", tr("Exit and stability"), tr("Release gate"),
-                  tr("Six consecutive IPv4 exit checks span at least 15 seconds on the same tunnel and visible route. Failures or changes restart the window."),
+                  tr("Six consecutive exit checks span at least 15 seconds on the same tunnel and visible route. Failures or changes restart the window."),
                   tr("Primary and backup HTTPS probes"))
             layer(5, "macwindow.on.rectangle", tr("App traffic"), tr("Device-wide"),
                   tr("The same rule covers browsers, desktop apps, VS Code, and Terminal. A wrong exit or disconnect blocks traffic again."),
