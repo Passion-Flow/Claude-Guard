@@ -1,3 +1,4 @@
+#if GUARD_DIAGNOSTICS
 import AppKit
 import SwiftUI
 
@@ -30,3 +31,4 @@ enum GuardPreviews {
         try data.write(to: url, options: .atomic)
     }
 }
+#endif

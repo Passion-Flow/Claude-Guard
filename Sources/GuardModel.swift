@@ -225,7 +225,7 @@ final class GuardController: ObservableObject {
         if let data = preferences.data(forKey: "approvedRoute") {
             approvedRoute = try? JSONDecoder().decode(ApprovedRoute.self, from: data)
         }
-        if let data = preferences.data(forKey: "reviewedTransports"),
+        if let data = preferences.data(forKey: "reviewedTransportsV2"),
            let saved = try? JSONDecoder().decode([String: TransportEvidence.Kind].self, from: data) {
             reviewedTransports = saved
         }
@@ -239,7 +239,8 @@ final class GuardController: ObservableObject {
     var canGoLive: Bool {
         guard !busy, !detectingEndpoint else { return false }
         if !active {
-            return approvedRoute?.endpointKey == configuration.endpointKey && approvedRoute?.expected == configuration.exit
+            return !currentTransport.blocksActivation &&
+                approvedRoute?.endpointKey == configuration.endpointKey && approvedRoute?.expected == configuration.exit
         }
         guard let status, !stale, !legacyPolicy, status.trialVerified else { return false }
         return ["trial", "paused"].contains(status.mode) && !["ERROR", "DRIFT"].contains(status.phase)
@@ -347,13 +348,11 @@ final class GuardController: ObservableObject {
             return
         }
         let evidence = TransportEvidence.inspect(text, endpoint: endpoint)
-        if evidence.kind != .unknown || reviewedTransports[evidence.endpointKey]?.blocksActivation != true {
-            reviewedTransports[evidence.endpointKey] = evidence.kind
-            if let encoded = try? JSONEncoder().encode(reviewedTransports) {
-                preferences.set(encoded, forKey: "reviewedTransports")
-            }
+        reviewedTransports[evidence.endpointKey] = evidence.kind
+        if let encoded = try? JSONEncoder().encode(reviewedTransports) {
+            preferences.set(encoded, forKey: "reviewedTransportsV2")
         }
-        if reviewedTransports[evidence.endpointKey]?.blocksActivation == true {
+        if evidence.kind.blocksActivation {
             notice = GuardText("Use a node link with authenticated encryption and certificate verification enabled.")
             return
         }
@@ -453,7 +452,8 @@ final class GuardController: ObservableObject {
                 add("startup-error", GuardText("No status arrived from the local guardian."))
             }
         }
-        if currentActive, !aged, let incoming, incoming.mode == "live", incoming.phase == "OPEN",
+        if currentActive, !aged, !currentTransport.blocksActivation, let incoming,
+           incoming.policyID == GuardPolicy.id, incoming.mode == "live", incoming.phase == "OPEN",
            incoming.trialVerified, let serviceID = incoming.serviceID,
            incoming.endpointKey == configuration.endpointKey, incoming.expected == configuration.exit {
             let route = ApprovedRoute(endpointKey: configuration.endpointKey, expected: incoming.expected, serviceID: serviceID)

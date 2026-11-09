@@ -32,8 +32,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleName</key><string>Claude Guard</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.5</string>
-<key>CFBundleVersion</key><string>7</string>
+<key>CFBundleShortVersionString</key><string>0.2.6</string>
+<key>CFBundleVersion</key><string>8</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
@@ -48,11 +48,31 @@ done
 iconutil -c icns "$build/Guard.iconset" -o "$app/Contents/Resources/Guard.icns"
 cp -R Resources/. "$app/Contents/Resources/"
 plutil -lint "$app/Contents/Info.plist" Resources/*.lproj/*.strings RecoveryResources/*.lproj/*.strings
-codesign --force --sign - "$app"
-codesign --verify --strict --deep "$app"
-"$app/Contents/MacOS/ClaudeGuard" --self-test
+sign_app() {
+  if [[ "$signing_identity" == "-" ]]; then
+    codesign --force --options runtime --timestamp=none --sign - "$1"
+  else
+    codesign --force --options runtime --timestamp --sign "$signing_identity" "$1"
+  fi
+  codesign --verify --strict --deep "$1"
+}
+signing_identity="${GUARD_CODESIGN_IDENTITY:--}"
+sign_app "$app"
+diagnostics="$build/diagnostics/Claude Guard.app"
+mkdir -p "$diagnostics"
+cp -R "$app/Contents" "$diagnostics/"
+swiftc -swift-version 5 -target "$(uname -m)-apple-macos13.0" -D GUARD_DIAGNOSTICS -O \
+  -o "$diagnostics/Contents/MacOS/ClaudeGuard" Sources/*.swift "$build/PrivilegedSource.swift"
+codesign --force --sign - "$diagnostics"
+"$diagnostics/Contents/MacOS/ClaudeGuard" --self-test
 if [[ "${RENDER_PREVIEWS:-0}" == 1 ]]; then
-  "$app/Contents/MacOS/ClaudeGuard" --preview "$output/previews"
+  "$diagnostics/Contents/MacOS/ClaudeGuard" --preview "$output/previews"
+fi
+if "$app/Contents/MacOS/ClaudeGuard" --self-test; then
+  echo "Release binary accepted a diagnostic entry point." >&2
+  exit 1
+else
+  [[ "$?" -eq 64 ]]
 fi
 lipo -info "$app/Contents/MacOS/ClaudeGuard"
 recovery="$build/stage/Claude Guard Recovery.app"
@@ -61,11 +81,10 @@ cp -R "$app" "$recovery"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName Claude Guard Recovery" "$recovery/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Claude Guard Recovery" "$recovery/Contents/Info.plist"
 cp -R RecoveryResources/. "$recovery/Contents/Resources/"
-codesign --force --sign - "$recovery"
-codesign --verify --strict --deep "$recovery"
+sign_app "$recovery"
 ln -s /Applications "$build/stage/Applications"
 cp README.md "$build/stage/Installation.md"
 cp Docs/Installation.zh-Hans.md "$build/stage/Installation.zh-Hans.md"
-image="$output/Claude-Guard-Mac-0.2.5-beta.dmg"
+image="$output/Claude-Guard-Mac-0.2.6-beta.dmg"
 hdiutil create -ov -format UDZO -volname "Claude Guard" -srcfolder "$build/stage" "$image"
 hdiutil verify "$image"

@@ -18,25 +18,60 @@ import sys
 root = Path(__file__).parent
 args = sys.argv[1:]
 rules = root / 'rules'
+ref = root / 'reference'
+disabled = root / 'pf-disabled'
 if args == ['-sr']:
     print((root / 'main').read_text(), end='')
 elif args == ['-s', 'info']:
-    print('Status: Enabled')
+    print('Status: Disabled' if disabled.exists() else 'Status: Enabled')
+elif args == ['-s', 'References']:
+    if ref.exists():
+        print('TOKENS:')
+        print('Process  Process Name                 TOKEN                    TIMESTAMP')
+        print('123      pfctl                        ' + ref.read_text() + '                      0 days 00:00:00')
+    else:
+        print('pfctl: No pf_enabled references', file=sys.stderr)
+        sys.exit(1)
 elif args == ['-E']:
-    print('Token : 773')
-elif args == ['-X', '773']:
+    token = str(774 if disabled.exists() else 773)
+    if disabled.exists():
+        disabled.unlink()
+    ref.write_text(token)
+    print('Token : ' + token)
+elif len(args) == 2 and args[0] == '-X':
+    if not ref.exists() or ref.read_text() != args[1]:
+        print('pf: token invalid', file=sys.stderr)
+        sys.exit(1)
+    ref.unlink()
     (root / 'released').touch()
 elif args == ['-F', 'states']:
     (root / 'flushed').touch()
+    with (root / 'flush-log').open('a') as log:
+        print('flush', file=log)
 elif args[-2:] == ['-F', 'rules']:
     rules.write_text('')
 elif args[-2:] == ['-f', '-']:
     incoming = sys.stdin.read()
     if '-n' not in args:
         rules.write_text(incoming)
+        fault = root / 'fail-open-readback'
+        if 'CG_TUNNEL' in incoming and fault.exists():
+            fault.unlink()
+            (root / 'fail-next-readback').touch()
+    elif '-v' in args:
+        print(incoming, end='')
 elif args[-1:] == ['-sr'] and args[1].startswith('com.apple/00000'):
-    print(rules.read_text() if rules.exists() else '', end='')
-elif args in (['-a', 'com.apple', '-s', 'Anchors'], ['-v', '-s', 'Interfaces']):
+    fault = root / 'fail-next-readback'
+    if fault.exists():
+        fault.unlink()
+        sys.exit(3)
+    if not rules.exists() or not rules.read_text():
+        sys.exit(3)
+    print(rules.read_text(), end='')
+elif args == ['-a', 'com.apple', '-s', 'Anchors']:
+    if rules.exists() and rules.read_text():
+        print('00000.org.claudeguard.runtime')
+elif args == ['-v', '-s', 'Interfaces']:
     pass
 else:
     sys.exit(3)
@@ -52,7 +87,7 @@ args = sys.argv[1:]
 service = (root / 'service').read_text().strip()
 connection = (root / 'vpn').read_text().strip()
 if args == ['--nc', 'list']:
-    print('* VPN ' + service + ' [VPN:com.liguangming.Shadowrocket]')
+    print('* (Connected)      ' + service + ' VPN (com.liguangming.Shadowrocket) "Shadowrocket" [VPN:com.liguangming.Shadowrocket]')
 elif args == ['--nc', 'status', service]:
     if connection.startswith('utun'):
         print('Connected')
@@ -120,7 +155,9 @@ if Path(__file__).with_name("ethernet").exists():
 from pathlib import Path
 import sys
 root = Path(__file__).parent
-if sys.argv[1:] == ['-a']:
+if sys.argv[1:] == ['-l']:
+    print('lo0 en0 en1 utun6')
+elif sys.argv[1:] == ['-a']:
     print('en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST>')
     print('    inet 192.0.2.30 netmask 0xffffff00')
     print('    status: ' + ('inactive' if (root / 'wifi-down').exists() else 'active'))
@@ -132,7 +169,7 @@ if sys.argv[1:] == ['-a']:
     print('    inet 198.51.100.3 netmask 0xffffff00')
 """)
     ifconfig.chmod(0o755)
-    standard = 'anchor "com.apple/*" all\n'
+    standard = 'scrub-anchor "com.apple/*" all\nanchor "com.apple/*" all\n'
     (root / "main").write_text(standard)
     (root / "exit").write_text("192.0.2.42\n")
     script = SOURCE.read_text().replace(
@@ -163,12 +200,12 @@ if sys.argv[1:] == ['-a']:
     # for the remaining state-machine fixtures.
     production = ["/bin/sh", "-c", script, "claude-guard-worker"]
     worker = subprocess.Popen(
-        production + ["worker", session, "live", "utun6", "192.0.2.42", "tcp", "443", "192.0.2.42"],
+        production + ["worker", session, "live", "utun6", "192.0.2.42", "tcp", "443", "192.0.2.42", service],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
     )
     try:
         expect("LOCKED", reason="settling")
-        assert status()[12] == "ipv4-tunnel-v1"
+        assert status()[12] == "ipv4-tunnel-v2"
         first = int(status()[2])
         time.sleep(4)
         assert status()[1] == "LOCKED"
@@ -189,12 +226,14 @@ if sys.argv[1:] == ['-a']:
     prefix = ["/bin/sh", "-c", scaled, "claude-guard-worker"]
     session = str(uuid.uuid4())
     worker = subprocess.Popen(
-        prefix + ["worker", session, "live", "utun6", "192.0.2.42", "tcp", "443", "192.0.2.42"],
+        prefix + ["worker", session, "live", "utun6", "192.0.2.42", "tcp", "443", "192.0.2.42", service],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
     )
     try:
         expect("OPEN")
         assert (root / "flushed").exists()
+        open_rules = (root / "rules").read_text()
+        assert all("on en" in rule for rule in open_rules.splitlines() if "CG_PEER_OUT" in rule)
         runtime_journal = runtime / "events"
         prior_locks = runtime_journal.read_text().count("|LOCKED|")
 
@@ -293,12 +332,41 @@ if sys.argv[1:] == ['-a']:
         assert "CG_TUNNEL" not in (root / "rules").read_text()
         (root / "service").write_text(service)
         expect("OPEN", interface="utun9")
+        # Missing owned rules must be resealed before dwell restarts.
+        (root / "rules").unlink()
+        expect("LOCKED", reason="pf-resealed")
+        assert "CG_TUNNEL" not in (root / "rules").read_text()
+        assert "CG_PROBE_OUT" not in (root / "rules").read_text()
+        expect("LOCKED", reason="settling")
+        expect("OPEN", interface="utun9")
+
+        # A write with failed readback must fall back to a verified sealed phase.
+        (root / "fail-open-readback").touch()
+        (root / "gateway").write_text("192.0.2.3")
+        expect("LOCKED", reason="pf-resealed")
+        assert "CG_TUNNEL" not in (root / "rules").read_text()
+        expect("OPEN", interface="utun9")
+
+        # An explicit disable invalidates all reference tokens. Restore only our
+        # filter and flush state before revalidating the existing tunnel.
+        (root / "pf-disabled").touch()
+        (root / "reference").unlink()
+        expect("LOCKED", reason="pf-resealed")
+        assert (root / "reference").read_text() == "774"
+        assert not (root / "pf-disabled").exists()
+        assert "CG_TUNNEL" not in (root / "rules").read_text()
+        assert len((root / "flush-log").read_text().splitlines()) >= 4
+        expect("OPEN", interface="utun9")
+
+        # An unknown root must not be rewritten or repeatedly flushed. Once the
+        # approved layout returns, traffic still needs the full dwell.
         (root / "main").write_text("pass all\n" + standard)
         expect("DRIFT")
-        (root / "main").write_text(standard)
-        time.sleep(3)
-        assert status()[1] == "DRIFT"
         assert "CG_TUNNEL" not in (root / "rules").read_text()
+        assert (root / "main").read_text().startswith("pass all\n")
+        (root / "main").write_text(standard)
+        expect("LOCKED", reason="pf-resealed")
+        expect("OPEN", interface="utun9")
         subprocess.run(prefix + ["stop"], check=True, capture_output=True)
         expect("IDLE")
         assert (root / "rules").read_text() == ""
@@ -339,11 +407,16 @@ if sys.argv[1:] == ['-a']:
         assert "CG_BLOCK" in (root / "rules").read_text()
         assert "CG_TUNNEL" not in (root / "rules").read_text()
 
-        # A separate recovery process can restore after the worker has died.
+        # A separate recovery process can restore after the worker has died
+        # and the recorded reference and anchor have already disappeared.
+        (root / "rules").unlink()
+        (root / "reference").unlink()
+        (root / "pf-disabled").touch()
+        (runtime / "ref.interrupted").touch()
         subprocess.run(prefix + ["stop"], check=True, capture_output=True)
         expect("IDLE")
-        assert (root / "rules").read_text() == ""
-        assert (root / "released").exists()
+        assert not (root / "rules").exists()
+        assert not (root / "released").exists()
         assert not (runtime / "active").exists()
     finally:
         if worker.poll() is None:
@@ -378,4 +451,4 @@ if sys.argv[1:] == ['-a']:
             worker.terminate()
             worker.communicate(timeout=8)
 
-print("PASS: full dwell, route change, dwell failure, clock gap, backup, one-round grace, persistent failure, wrong exit, Wi-Fi loss, stale tunnel recycle, Ethernet failover, recovery, retry, same-service utun rebinding, foreign-service denial, expiry lock, explicit continuation, unexpected exit, independent restore and saved-service rearm")
+print("PASS: full dwell, route change, dwell failure, clock gap, backup, one-round grace, persistent failure, wrong exit, Wi-Fi loss, stale tunnel recycle, Ethernet failover, missing rules, failed readback, disabled filter, incompatible layout recovery, retry, same-service utun rebinding, foreign-service denial, expiry lock, explicit continuation, unexpected exit, independent restore and saved-service rearm")

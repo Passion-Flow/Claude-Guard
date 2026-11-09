@@ -69,8 +69,8 @@ enum GuardAppearance: String, CaseIterable {
 }
 
 enum GuardPolicy {
-    static let id = "ipv4-tunnel-v1"
-    static let version = "0.2.5"
+    static let id = "ipv4-tunnel-v2"
+    static let version = "0.2.6"
     static let preferences = UserDefaults(suiteName: "org.claudeguard.appearance") ?? .standard
 }
 
@@ -97,6 +97,7 @@ enum GuardCopy {
         "worker-stopped": GuardText("The guardian stopped unexpectedly and did not release its rules. Use the local recovery tool."),
         "tunnel-missing": GuardText("The tunnel disappeared. Restore networking and run detection again."),
         "pf-load": GuardText("macOS could not load or verify the protection rules."),
+        "pf-resealed": GuardText("Blocking was restored. Apps stay locked until the route is verified again."),
         "pf-changed": GuardText("The system packet filter changed. Protection coverage cannot be confirmed."),
         "rollback-failed": GuardText("Recovery did not complete. Try Restore network again or restart this Mac to clear the session rules."),
         "trial-ended": GuardText("The trial ended and the original rules were restored."),

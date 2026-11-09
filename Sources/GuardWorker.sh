@@ -12,7 +12,7 @@ stability_seconds=15
 stability_samples=6
 stability_tick=3
 stability_max_gap=8
-policy_id=ipv4-tunnel-v1
+policy_id=ipv4-tunnel-v2
 session=
 mode=
 owned=0
@@ -26,29 +26,33 @@ trial_verified=0
 vpn_service=
 endpoint_key=
 loaded=
+physical_ifaces=
 
 valid_ip() {
   printf '%s\n' "$1" | /usr/bin/awk -F. '
     NF != 4 { exit 1 }
-    { for (i=1; i<=4; i++) if ($i !~ /^(0|[1-9][0-9]*)$/ || length($i)>3 || $i>255) exit 1 }'
+    { for (i=1; i<=4; i++) if ($i !~ /^(0|[1-9][0-9]*)$/ || length($i)>3 || $i>255) exit 1 }
+    END { if (NR != 1) exit 1 }'
 }
 valid_iface() {
-  case "$1" in utun*) suffix=$(printf '%s' "$1" | /usr/bin/cut -c5-);; *) return 1;; esac
+  case "$1" in utun*) suffix=${1#utun};; *) return 1;; esac
   case "$suffix" in ""|*[!0-9]*) return 1;; esac
 }
 valid_port() {
-  case "$1" in ""|*[!0-9]*) return 1;; esac
-  [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+  case "$1" in ""|0*|*[!0-9]*) return 1;; esac
+  [ "${#1}" -le 5 ] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
 }
 valid_session() {
-  case "$1" in ""|*[!a-f0-9-]*) return 1;; esac
-  [ "$(/bin/echo "$1" | /usr/bin/tr -d '\n' | /usr/bin/wc -c | /usr/bin/tr -d ' ')" -eq 36 ]
+  printf '%s\n' "$1" | /usr/bin/awk -F- '
+    NF != 5 || length($1)!=8 || length($2)!=4 || length($3)!=4 ||
+      length($4)!=4 || length($5)!=12 || $0 !~ /^[0-9a-fA-F-]+$/ { exit 1 }
+    END { if (NR != 1) exit 1 }'
 }
 shadowrocket_services() {
   /usr/sbin/scutil --nc list | /usr/bin/awk '
-    index($0, "[VPN:com.liguangming.Shadowrocket]") {
-      for (i=1; i<=NF; i++) if (length($i)==36 && $i ~ /^[0-9A-Fa-f-]+$/) print $i
-    }'
+    $1=="*" && $4=="VPN" && $5=="(com.liguangming.Shadowrocket)" &&
+      $NF=="[VPN:com.liguangming.Shadowrocket]" && length($3)==36 &&
+      $3 ~ /^[0-9A-Fa-f-]+$/ { print $3 }'
 }
 
 vpn_connection() {
@@ -99,15 +103,17 @@ build_rules() {
   extra=
   [ "$protocol" != tcp ] || extra='flags any'
   printf 'pass quick on lo0 all no state label "CG_LOOP"\n'
-  printf 'pass out quick inet proto %s from any to %s port = %s %s keep state (if-bound) label "CG_PEER_OUT"\n' "$protocol" "$peer" "$port" "$extra"
-  # IPv4 DHCP only. No general LAN, DNS, or IPv6 exception.
-  printf 'pass out quick inet proto udp from any port = 68 to 255.255.255.255 port = 67 no state label "CG_DHCP_OUT"\n'
-  printf 'pass in quick inet proto udp from any port = 67 to any port = 68 no state label "CG_DHCP_IN"\n'
+  for physical in $physical_ifaces; do
+    printf 'pass out quick on %s inet proto %s from any to %s port = %s %s keep state (if-bound) label "CG_PEER_OUT"\n' "$physical" "$protocol" "$peer" "$port" "$extra"
+    # Broadcast DHCP remains available on physical links during recovery.
+    printf 'pass out quick on %s inet proto udp from any port = 68 to 255.255.255.255 port = 67 no state label "CG_DHCP_OUT"\n' "$physical"
+    printf 'pass in quick on %s inet proto udp from any port = 67 to any port = 68 no state label "CG_DHCP_IN"\n' "$physical"
+  done
   if [ "$rule_phase" = OPEN ]; then
     printf 'pass quick on %s inet all no state label "CG_TUNNEL"\n' "$iface"
   elif [ "$rule_phase" = LOCKED ]; then
     for probe in "$probe_primary" "$probe_backup"; do
-      printf 'pass out quick on %s inet proto tcp from any to %s port = 443 flags any no state label "CG_PROBE_OUT"\n' "$iface" "$probe"
+      printf 'pass out quick on %s inet proto tcp from any to %s port = 443 user root flags any no state label "CG_PROBE_OUT"\n' "$iface" "$probe"
       printf 'pass in quick on %s inet proto tcp from %s port = 443 to any flags any no state label "CG_PROBE_IN"\n' "$iface" "$probe"
     done
   fi
@@ -119,6 +125,7 @@ preflight() {
   main=$("$pf" -sr 2>/dev/null) || return 1
   printf '%s\n' "$main" | /usr/bin/awk '
     /^[[:space:]]*$/ { next }
+    $0=="scrub-anchor \"com.apple/*\"" || $0=="scrub-anchor \"com.apple/*\" all" { next }
     $0=="anchor \"cisco.anyconnect.vpn\" all" { next }
     $0=="anchor \"com.apple/*\" all" { count++; next }
     { bad=1 }
@@ -131,7 +138,7 @@ preflight() {
   printf '%s\n' "$siblings" | /usr/bin/awk -v ours="$anchor" '
     NF {
       name=$1
-      if (name !~ /\//) name="com.apple/"name
+      if (index(name,"/")==0) name="com.apple/"name
       if (name != ours && name < ours) bad=1
     }
     END { exit bad }' || return 1
@@ -157,15 +164,39 @@ publish() {
   fi
 }
 
+anchor_rules() {
+  if anchor_output=$("$pf" -a "$anchor" -sr 2>/dev/null); then
+    printf '%s' "$anchor_output"
+    return
+  fi
+  # Treat the anchor as absent only if a successful parent listing confirms it.
+  listed=$("$pf" -a com.apple -s Anchors 2>/dev/null) || return 1
+  printf '%s\n' "$listed" | /usr/bin/awk -v ours="$anchor" '
+    NF {
+      name=$1
+      if (index(name,"/")==0) name="com.apple/"name
+      if (name==ours) present=1
+    }
+    END { exit present }'
+}
+
+release_reference() {
+  [ -n "$1" ] || return 0
+  if "$pf" -X "$1" >/dev/null 2>&1; then return 0; fi
+  # A disable invalidates references. Distinguish absence from a failed read.
+  if reference_active "$1"; then return 1; else [ "$?" -eq 1 ]; fi
+}
+
 clear_owned() {
   if [ "$owned" = 1 ]; then
-    "$pf" -a "$anchor" -F rules >/dev/null 2>&1 || return 1
-    remaining=$("$pf" -a "$anchor" -sr 2>/dev/null) || return 1
-    [ -z "$remaining" ] || return 1
+    remaining=$(anchor_rules) || return 1
+    if [ -n "$remaining" ]; then
+      "$pf" -a "$anchor" -F rules >/dev/null 2>&1 || return 1
+      remaining=$(anchor_rules) || return 1
+      [ -z "$remaining" ] || return 1
+    fi
   fi
-  if [ -n "$token" ]; then
-    "$pf" -X "$token" >/dev/null 2>&1 || return 1
-  fi
+  release_reference "$token"
 }
 
 remove_marker() {
@@ -185,7 +216,7 @@ cleanup() {
   trap - EXIT HUP INT TERM
   if [ "$owned" = 1 ] && [ "$restore_requested" = 0 ]; then
     # Exit traps run on ordinary errors too. Preserve the filter on faults.
-    current=$("$pf" -a "$anchor" -sr 2>/dev/null || true)
+    current=$(anchor_rules || true)
     if [ -n "$loaded" ] && [ "$current" = "$loaded" ]; then
       load_phase SEALED || true
     fi
@@ -210,22 +241,72 @@ handle_signal() {
 }
 
 load_phase() {
-  build_rules "$1" | "$pf" -a "$anchor" -f - >/dev/null 2>&1 || return 1
-  loaded=$("$pf" -a "$anchor" -sr 2>/dev/null) || return 1
-  case "$loaded" in *CG_BLOCK*CG_*) return 1;; *CG_BLOCK*) :;; *) return 1;; esac
-  case "$1:$loaded" in
-    OPEN:*CG_TUNNEL*|LOCKED:*CG_PROBE_OUT*) :;;
-    SEALED:*CG_TUNNEL*|SEALED:*CG_PROBE_OUT*) return 1;;
-    SEALED:*CG_PEER_OUT*) :;;
-    *) return 1;;
-  esac
+  generated=$(build_rules "$1") || return 1
+  canonical=$(printf '%s\n' "$generated" | "$pf" -n -v -a "$anchor" -f - 2>/dev/null) || return 1
+  [ -n "$canonical" ] || return 1
+  printf '%s\n' "$generated" | "$pf" -a "$anchor" -f - >/dev/null 2>&1 || return 1
+  if ! new_rules=$(anchor_rules) || [ "$new_rules" != "$canonical" ]; then
+    # The write succeeded but readback did not establish enforcement.
+    if [ "$1" != SEALED ]; then
+      load_phase SEALED || true
+    fi
+    return 1
+  fi
+  loaded=$new_rules
+}
+
+filter_enabled() {
+  info=$("$pf" -s info 2>/dev/null) || return 1
+  printf '%s\n' "$info" | /usr/bin/grep -q '^Status: Enabled'
+}
+
+reference_active() {
+  [ -n "$1" ] || return 1
+  if ! references=$("$pf" -s References 2>&1); then
+    case "$references" in
+      'pfctl: No pf_enabled references'|'No pf_enabled references') return 1;;
+      *) return 2;;
+    esac
+  fi
+  printf '%s\n' "$references" | /usr/bin/awk -v wanted="$1" '
+    $1 ~ /^[0-9]+$/ && $2=="pfctl" && "x" $3=="x" wanted { present=1 }
+    END { exit !present }'
 }
 
 rules_intact() {
-  current=$("$pf" -a "$anchor" -sr 2>/dev/null) || return 1
-  info=$("$pf" -s info 2>/dev/null) || return 1
-  preflight && [ "$current" = "$loaded" ] &&
-    printf '%s\n' "$info" | /usr/bin/grep -q '^Status: Enabled'
+  current=$(anchor_rules) || return 1
+  [ -n "$loaded" ] && [ "$current" = "$loaded" ] && preflight && filter_enabled && reference_active "$token"
+}
+
+acquire_reference() {
+  previous_token=$token
+  enabled=$("$pf" -E 2>&1) || return 1
+  next_token=$(printf '%s\n' "$enabled" | /usr/bin/awk -F: '/Token[[:space:]]*:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}')
+  case "$next_token" in ""|*[!0-9]*) return 1;; esac
+  token=$next_token
+  token_file=$(/usr/bin/mktemp "$directory/ref.XXXXXX") || return 1
+  printf '%s\n' "$token" > "$token_file" && /bin/mv -f "$token_file" "$directory/active/token" || return 1
+  if [ "$previous_token" != "$token" ]; then release_reference "$previous_token" || return 1; fi
+}
+
+repair_filter() {
+  current=$(anchor_rules) || return 1
+  preflight || return 1
+  # Never overwrite rules we cannot identify, even under our anchor.
+  [ -z "$current" ] || [ "$current" = "$loaded" ] || return 1
+  load_phase SEALED || return 1
+  if reference_active "$token"; then
+    filter_enabled || return 1
+  else
+    [ "$?" -eq 1 ] && acquire_reference || return 1
+  fi
+  rules_intact && "$pf" -F states >/dev/null 2>&1
+}
+
+physical_interfaces() {
+  available=$(/sbin/ifconfig -l) || return 1
+  printf '%s\n' "$available" | /usr/bin/awk '
+    { for (i=1; i<=NF; i++) if ($i ~ /^en[0-9]+$/) print $i }' | /usr/bin/sort -u | /usr/bin/paste -sd ' ' -
 }
 
 underlay_snapshot() {
@@ -246,7 +327,7 @@ underlay_snapshot() {
   # Store only visible non-tunnel default routes, in memory, to detect a path change.
   keys=$(printf '%s\n' "$routes" | /usr/bin/awk -v usable="$usable" '
     BEGIN { count=split(usable, list, " "); for (i=1; i<=count; i++) ready[list[i]]=1 }
-    $1=="default" && ready[$4] && $4 !~ /^(utun|lo)[0-9]+$/ {
+    $1=="default" && ready[$4] && $4 ~ /^en[0-9]+$/ {
       print $4 "=" $2
     }') || return 1
   keys=$(printf '%s\n' "$keys" | /usr/bin/sort -u) || return 1
@@ -278,18 +359,23 @@ sample_exit() {
   return 1
 }
 
-action=$1
+action=${1-}
 case "$action" in
-  parse-vpn) parse_vpn_status; exit;;
+  parse-vpn) [ "$#" -eq 1 ] || exit 2; parse_vpn_status; exit;;
   rules)
+    [ "$#" -eq 6 ] || exit 2
     # Nonprivileged preview and syntax tests. No /dev/pf writes.
     iface=$2; peer=$3; protocol=$4; port=$5; rule_phase=$6
     valid_iface "$iface" && valid_ip "$peer" && valid_port "$port" || exit 2
     case "$protocol" in tcp|udp) :;; *) exit 2;; esac
     case "$rule_phase" in OPEN|LOCKED|SEALED) :;; *) exit 2;; esac
+    physical_ifaces="en0"
     build_rules "$rule_phase"
     exit
     ;;
+  stop|continue) [ "$#" -eq 1 ] || exit 2;;
+  worker) [ "$#" -eq 8 ] || [ "$#" -eq 9 ] || exit 2;;
+  *) exit 2;;
 esac
 
 [ "$(/usr/bin/id -u)" -eq 0 ] || exit 77
@@ -331,7 +417,7 @@ case "$action" in
           ;;
       esac
     fi
-    loaded=$("$pf" -a "$anchor" -sr 2>/dev/null)
+    loaded=$(anchor_rules) || exit 81
     case "$loaded" in *CG_BLOCK*) owned=1;; "") :;; *) exit 81;; esac
     clear_owned
     remove_active
@@ -347,7 +433,11 @@ case "$action" in
     endpoint_key="$peer:$port/$protocol"
     valid_session "$session" && valid_iface "$iface" && valid_ip "$peer" && valid_ip "$expected" && valid_port "$port" || exit 2
     case "$protocol" in tcp|udp) :;; *) exit 2;; esac
-    case "$mode" in trial|live) :;; *) exit 2;; esac
+    case "$mode" in
+      trial) [ "$#" -eq 0 ] || exit 2;;
+      live) [ "$#" -eq 1 ] && valid_session "$approved_service" || exit 2;;
+      *) exit 2;;
+    esac
     [ "$peer" != "$probe_primary" ] && [ "$peer" != "$probe_backup" ] || exit 2
     /bin/mkdir -m 0700 "$directory/active" || exit 83
     printf '%s\n' "$$" > "$directory/active/pid"
@@ -360,12 +450,12 @@ case "$action" in
     end_state=ERROR
     finish_reason=pf-layout
     preflight || exit 84
-    [ -z "$("$pf" -a "$anchor" -sr 2>/dev/null)" ] || exit 85
+    existing=$(anchor_rules) || exit 85
+    [ -z "$existing" ] || exit 85
+    physical_ifaces=$(physical_interfaces) || exit 85
     finish_reason=tunnel-unverified
     phase=LOCKED
     if [ -n "$approved_service" ]; then
-      [ "$mode" = live ] || exit 86
-      case "$approved_service" in *[!0-9A-Fa-f-]*) exit 86;; esac
       shadowrocket_services | /usr/bin/grep -Fxq -- "$approved_service" || exit 86
       vpn_service=$approved_service
       connection=$(vpn_connection "$vpn_service" || true)
@@ -384,10 +474,7 @@ case "$action" in
     build_rules "$phase" | "$pf" -n -a "$anchor" -f - >/dev/null 2>&1 || exit 87
     owned=1
     load_phase "$phase" || exit 88
-    enabled=$("$pf" -E 2>&1) || exit 89
-    token=$(printf '%s\n' "$enabled" | /usr/bin/awk -F: '/Token[[:space:]]*:/ {gsub(/[[:space:]]/,"",$2); print $2; exit}')
-    case "$token" in ""|*[!0-9]*) token=; exit 90;; esac
-    printf '%s\n' "$token" > "$directory/active/token"
+    acquire_reference || exit 89
     # Remove floating state inherited from before activation. This resets active connections once.
     "$pf" -F states >/dev/null 2>&1 || exit 91
     last_probe=0
@@ -399,29 +486,46 @@ case "$action" in
     retry_pid=
     recovery_link_lost=0
     recovery_probe_misses=0
+    last_tick=$(/bin/date +%s)
     while :; do
       now=$(/bin/date +%s)
+      if [ "$mode" = trial ] && { [ "$now" -ge "$expires" ] || [ "$now" -lt "$last_tick" ]; }; then
+        mode=paused
+        expires=0
+        reset_stability
+      fi
+      last_tick=$now
       current=
       if [ "$drift" = 1 ] || ! rules_intact; then
-        # Latch drift. Other rules may have created new floating states in the meantime.
         drift=1
-        if [ "$phase" = OPEN ] && [ "$current" = "$loaded" ]; then
-          if load_phase SEALED; then phase=SEALED; fi
-        fi
-        publish DRIFT "-" pf-changed
         reset_stability
+        bound_path=
+        if repair_filter; then
+          phase=SEALED
+          drift=0
+          publish LOCKED "-" pf-resealed
+        else
+          # Seal an unchanged child even if its parent is currently unsafe.
+          if [ "$phase" = OPEN ] && [ -n "$loaded" ] && [ "$current" = "$loaded" ]; then
+            if load_phase SEALED; then phase=SEALED; fi
+          fi
+          publish DRIFT "-" pf-changed
+        fi
         /bin/sleep 2
         continue
+      fi
+      if detected_ifaces=$(physical_interfaces) && [ "$detected_ifaces" != "$physical_ifaces" ]; then
+        physical_ifaces=$detected_ifaces
+        load_phase SEALED || { drift=1; continue; }
+        phase=SEALED
+        reset_stability
+        bound_path=
+        publish LOCKED "-" route-changed
       fi
       if [ "$trial_verified" = 1 ] && [ "$mode" != live ] && [ -f "$directory/continue-$session" ]; then
         remove_marker "$directory/continue-$session"
         mode=live
         expires=0
-      fi
-      if [ "$mode" = trial ] && [ "$now" -ge "$expires" ]; then
-        mode=paused
-        expires=0
-        reset_stability
       fi
       if [ "$mode" = paused ]; then
         if [ "$phase" != SEALED ]; then
@@ -463,9 +567,9 @@ case "$action" in
           if [ "$phase" = SEALED ] || [ "$candidate" != "$iface" ] || [ "$reason" = route-changed ] ||
              { [ "$phase" = OPEN ] && { [ $((now - last_probe)) -gt 10 ] || [ "$now" -lt "$last_probe" ]; }; }; then
             iface=$candidate
-            phase=LOCKED
             reset_stability
             load_phase LOCKED || { drift=1; continue; }
+            phase=LOCKED
             publish LOCKED "-" "$reason"
           fi
           bound_path=$path
@@ -544,13 +648,6 @@ case "$action" in
           consecutive=$((consecutive + 1))
           reason=settling
           if [ "$consecutive" -ge "$stability_samples" ] && [ $((last_probe - stable_since)) -ge "$stability_seconds" ]; then
-            # Validate the boundary again after the last network probe, before exposing ordinary traffic.
-            if ! rules_intact; then
-              drift=1
-              publish DRIFT "-" pf-changed
-              /bin/sleep 2
-              continue
-            fi
             desired=OPEN
             reason=stable-open
             next_retry=0
@@ -591,6 +688,10 @@ case "$action" in
           continue
         fi
         reset_stability
+      fi
+      if [ "$desired" = OPEN ] && ! rules_intact; then
+        drift=1
+        continue
       fi
       if [ "$desired" != "$phase" ]; then
         if ! load_phase "$desired"; then

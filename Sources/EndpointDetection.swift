@@ -114,7 +114,12 @@ struct TransportEvidence: Codable {
     enum Kind: String, Codable {
         case tls, reality, quicTLS, unencrypted, insecure, unknown
 
-        var blocksActivation: Bool { self == .unencrypted || self == .insecure }
+        var blocksActivation: Bool {
+            switch self {
+            case .tls, .reality, .quicTLS: return false
+            case .unencrypted, .insecure, .unknown: return true
+            }
+        }
 
         var title: GuardText {
             switch self {
@@ -134,22 +139,38 @@ struct TransportEvidence: Codable {
     static func inspect(_ text: String, endpoint: DetectedEndpoint) -> Self {
         let url = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines))
         let options = url?.queryItems ?? []
-        let insecureNames = ["insecure", "allowinsecure", "skip-cert-verify", "skipcertverify"]
-        let enabledValues = ["1", "true", "yes", "on"]
-        let disablesVerification = options.contains {
-            insecureNames.contains($0.name.lowercased()) && enabledValues.contains($0.value?.lowercased() ?? "")
+        func matching(_ name: String) -> [URLQueryItem] {
+            options.filter { $0.name.lowercased() == name }
         }
-
+        let verificationAliases = ["insecure", "allowinsecure", "skipcertverify", "tlsinsecure"]
+        let verification = options.filter {
+            let normalized = $0.name.lowercased().filter { $0 != "-" && $0 != "_" }
+            return verificationAliases.contains(normalized)
+        }
+        let explicit = matching("security")
+        let scheme = url?.scheme?.lowercased()
         let kind: Kind
-        if disablesVerification {
+        if verification.count > 1 || verification.contains(where: {
+            !["0", "false"].contains($0.value?.lowercased() ?? "")
+        }) {
             kind = .insecure
-        } else if ["hysteria2", "hy2"].contains(url?.scheme?.lowercased() ?? "") {
-            kind = .quicTLS
+        } else if explicit.count > 1 {
+            kind = .unknown
+        } else if ["hysteria2", "hy2"].contains(scheme ?? "") {
+            kind = explicit.isEmpty || explicit.first?.value?.lowercased() == "tls" ? .quicTLS : .unknown
         } else {
-            let declared = options.filter { $0.name.lowercased() == "security" }
-            switch declared.count == 1 ? declared.first?.value?.lowercased() : nil {
-            case "tls": kind = .tls
-            case "reality": kind = .reality
+            switch explicit.first?.value?.lowercased() {
+            case "tls": kind = endpoint.transport == "tcp" ? .tls : .unknown
+            case "reality":
+                let publicKey = matching("pbk")
+                let fingerprint = matching("fp")
+                let key = publicKey.first?.value ?? ""
+                let encoded = key.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+                let keyBytes = key.count == 43 ? Data(base64Encoded: encoded + "=") : nil
+                let carrier = matching("type").first?.value?.lowercased() ?? ""
+                kind = ["vless", "trojan"].contains(scheme ?? "") && ["tcp", "raw", "grpc"].contains(carrier) &&
+                    publicKey.count == 1 && keyBytes?.count == 32 && fingerprint.count == 1 &&
+                    !(fingerprint.first?.value ?? "").isEmpty ? .reality : .unknown
             case "none": kind = .unencrypted
             default: kind = .unknown
             }
