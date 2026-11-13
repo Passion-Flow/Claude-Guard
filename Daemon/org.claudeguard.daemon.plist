@@ -8,6 +8,6 @@
 <key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>5</integer>
 <key>MachServices</key><dict><key>org.claudeguard.daemon</key><true/><key>org.claudeguard.daemon.recovery</key><true/></dict>
-<key>ProcessType</key><string>Background</string>
+<key>ProcessType</key><string>Interactive</string>
 <key>Umask</key><integer>63</integer>
 </dict></plist>

@@ -1,11 +1,15 @@
 """Exercise installer hooks against disposable paths and mock launchd/helpers."""
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 
 REPOSITORY = Path(__file__).resolve().parents[1]
+for name in ('org.claudeguard.daemon', 'org.claudeguard.offline-recovery'):
+    job = plistlib.loads((REPOSITORY / 'Daemon' / (name + '.plist')).read_bytes())
+    assert job['ProcessType'] == 'Interactive', 'Deadline-bound network protection must not be discretionary background work'
 distribution = ET.fromstring((REPOSITORY / 'Installer/Distribution.xml').read_text())
 assert distribution.find("pkg-ref[@id='org.claudeguard.private']/must-close/app[@id='org.claudeguard.mac']") is not None
 with tempfile.TemporaryDirectory(prefix="cg-installer-test-") as work:

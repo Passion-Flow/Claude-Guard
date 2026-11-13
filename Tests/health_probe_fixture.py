@@ -28,7 +28,9 @@ name='primary' if '1.1.1.1' in args[-1] else 'backup'
 case=json.loads((root/'scenario.json').read_text())[name]
 with (root/'started').open('a') as f:f.write(str(os.getpid())+'\\n')
 budget=float(args[args.index('--max-time')+1])
+started=time.monotonic()
 time.sleep(min(case['delay'],budget))
+(root/(name+'.timing')).write_text(json.dumps({'started':started,'finished':time.monotonic()}))
 if case['delay']>budget or case.get('unavailable'):raise SystemExit(28)
 body=case.get('body','ip=192.0.2.42\\nloc=US\\n')
 Path(args[args.index('--output')+1]).write_text(body)
@@ -53,7 +55,12 @@ if sample_exit; then printf '%s|%s|%s' "$observed" "$probe_used" "$probe_observe
         return result.stdout, time.monotonic() - began
 
     output, elapsed = run({'delay': 3}, {'delay': 3})
-    assert output.startswith('192.0.2.42|') and elapsed < 5, (output, elapsed)
+    timings=[json.loads((root/(name+'.timing')).read_text()) for name in ('primary','backup')]
+    overlap=min(x['finished'] for x in timings)-max(x['started'] for x in timings)
+    # Measure actual request overlap rather than attributing unrelated process
+    # startup/CPU scheduling time to serial transport. The enclosing seven-
+    # second bound and the four-second request arguments remain enforced.
+    assert output.startswith('192.0.2.42|') and overlap > 0, (output, elapsed, timings)
     output, elapsed = run({'delay': .1}, {'delay': 3.2})
     assert output.startswith('192.0.2.42|1.0.0.1|') and time.time() - int(output.split('|')[2]) < 2
     output, elapsed = run({'delay': .1}, {'delay': 3.2, 'unavailable': True})

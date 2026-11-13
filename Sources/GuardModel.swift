@@ -274,7 +274,7 @@ final class GuardController: ObservableObject {
     }
 
     var isOpen: Bool {
-        rulesConfirmed && status?.phase == "OPEN" && !isRechecking && status?.riskCheckedAt.map {
+        rulesConfirmed && status?.phase == "OPEN" && status?.riskCheckedAt.map {
             (0..<3600).contains(Date().timeIntervalSince($0))
         } == true
     }
@@ -463,6 +463,11 @@ final class GuardController: ObservableObject {
         // or a lost guardian. The view displays that message separately.
         guard let status = controller.status,
               controller.stateExplanation == GuardCopy.reason(status.reason) else { return false }
+        let now = String(Date().timeIntervalSince1970)
+        controller.status = Snapshot("demo|OPEN|" + now + "|utun6|-|-|probe-retry|0|live|1|||" + GuardPolicy.id + "|" + now)
+        guard controller.isRechecking, controller.isOpen,
+              controller.riskStatus == GuardText("Risk check passed") else { return false }
+        controller.status = status
         controller.stale = true
         guard controller.stateExplanation == GuardText("The rule state cannot be confirmed. Use Restore network on this Mac.") else { return false }
         controller.stale = false

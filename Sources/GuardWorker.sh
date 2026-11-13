@@ -47,6 +47,9 @@ probe_file=
 health_round=
 health_primary_pid=
 health_backup_pid=
+health_independent_pid=
+health_cache_file=$directory/independent-address
+probe_region_source=unavailable
 expected=
 risk_key=
 risk_region=
@@ -557,16 +560,19 @@ cleanup_health_round() {
   # before deleting their private files; a signal cannot leave overlapping rounds.
   if [ -n "$health_primary_pid" ]; then wait "$health_primary_pid" 2>/dev/null || true; fi
   if [ -n "$health_backup_pid" ]; then wait "$health_backup_pid" 2>/dev/null || true; fi
+  if [ -n "$health_independent_pid" ]; then wait "$health_independent_pid" 2>/dev/null || true; fi
   health_primary_pid=
   health_backup_pid=
+  health_independent_pid=
   if [ -n "$health_round" ]; then /bin/rm -rf -- "$health_round"; health_round=; fi
 }
 
 sample_exit() {
   probe_used=
   probe_observed_at=0
+  probe_region_source=unavailable
   health_round=$(/usr/bin/mktemp -d "$directory/health.XXXXXX") || return 1
-  /bin/mkdir -m 0700 "$health_round/primary" "$health_round/backup" || { cleanup_health_round; return 1; }
+  /bin/mkdir -m 0700 "$health_round/primary" "$health_round/backup" "$health_round/independent" || { cleanup_health_round; return 1; }
   # Give legitimate TLS setup the whole round budget without adding two
   # serial deadlines. Each child has separate output and transport metadata.
   (
@@ -585,14 +591,35 @@ sample_exit() {
     fi
   ) &
   health_backup_pid=$!
+  (
+    trap - EXIT HUP INT TERM
+    directory="$health_round/independent"
+    if [ "${phase:-}" = OPEN ] && risk_fresh "$(/bin/date +%s)"; then
+      context=$(independent_health_address) || exit 0
+      address=${context%|*}; budget=${context##*|}
+      route_via_tunnel "$address" || exit 0
+      if tunnel_response "$budget" --resolve "api.ipify.org:443:$address" \
+          'https://api.ipify.org' > "$health_round/independent.trace"; then
+        /bin/date +%s > "$health_round/independent.stamp"
+      fi
+    elif [ "${phase:-}" = LOCKED ] && [ ! -f "$health_cache_file" ]; then
+      # Prime DNS only; IP-only continuity cannot authorize initial admission.
+      independent_health_address >/dev/null || true
+    fi
+  ) &
+  health_independent_pid=$!
   wait "$health_primary_pid" || true
   wait "$health_backup_pid" || true
+  wait "$health_independent_pid" || true
   health_primary_pid=
   health_backup_pid=
+  health_independent_pid=
   chosen_observed=
   chosen_region=
   chosen_probe=
   chosen_stamp=0
+  chosen_region_source=observed
+  health_rejected=0
   for label in primary backup; do
     [ -f "$health_round/$label.stamp" ] || continue
     stamp=$(/bin/cat "$health_round/$label.stamp") || continue
@@ -611,14 +638,36 @@ sample_exit() {
     # A corroborated different exit is rejecting evidence, even when the other
     # endpoint succeeds. Never turn a mismatch into an availability fallback.
     if { [ -n "$expected" ] && [ "$observed" != "$expected" ]; } ||
-       { [ -z "$risk_key" ] && [ -n "$risk_region" ] && [ "$observed_region" != "$risk_region" ]; }; then break; fi
+       { [ -z "$risk_key" ] && [ -n "$risk_region" ] && [ "$observed_region" != "$risk_region" ]; }; then health_rejected=1; break; fi
   done
+  if [ "$health_rejected" = 0 ] && [ -f "$health_round/independent.stamp" ]; then
+    independent_stamp=$(/bin/cat "$health_round/independent.stamp") || independent_stamp=0
+    independent_result=$(/bin/cat "$health_round/independent.trace") || independent_result=
+    case "$independent_stamp" in ''|*[!0-9]*) independent_stamp=0;; esac
+    if [ "${#independent_stamp}" -le 12 ] && [ "$independent_stamp" -gt 0 ] && valid_ip "$independent_result"; then
+      if [ -n "$expected" ] && [ "$independent_result" != "$expected" ]; then
+        chosen_observed=$independent_result; chosen_region=; chosen_stamp=$independent_stamp
+        chosen_probe=independent; chosen_region_source=unavailable
+      elif [ -n "$chosen_observed" ]; then
+        if [ "$independent_stamp" -gt "$chosen_stamp" ]; then
+          chosen_stamp=$independent_stamp; chosen_probe=independent
+        fi
+      elif [ "${phase:-}" = OPEN ] && risk_fresh "$independent_stamp"; then
+        chosen_observed=$independent_result; chosen_region=$risk_region
+        chosen_stamp=$independent_stamp; chosen_probe=independent
+        # Preserve accepted region provenance and expiry. This is not a new
+        # geography observation and may never renew admission or risk.
+        chosen_region_source=accepted-cache
+      fi
+    fi
+  fi
   cleanup_health_round
   if [ -n "$chosen_observed" ]; then
     observed=$chosen_observed
     observed_region=$chosen_region
     probe_used=$chosen_probe
     probe_observed_at=$chosen_stamp
+    probe_region_source=$chosen_region_source
     return 0
   fi
   observed=-
@@ -653,6 +702,41 @@ public_risk_address() {
     ($1==172 && $2>=16 && $2<=31) || ($1==192 && ($2==0 || $2==168)) ||
     ($1==198 && ($2==18 || $2==19 || ($2==51 && $3==100))) ||
     ($1==203 && $2==0 && $3==113) { exit 1 }'
+}
+
+independent_health_address() {
+  health_now=$(/bin/date +%s)
+  if [ -f "$health_cache_file" ]; then
+    record=$(/bin/cat "$health_cache_file") || return 1
+    IFS='|' read -r address cached_at extra <<EOF
+$record
+EOF
+    case "$cached_at" in ''|*[!0-9]*) cached_at=0;; esac
+    if [ -z "$extra" ] && [ "$record" = "$address|$cached_at" ] &&
+       [ "${#cached_at}" -le 12 ] && [ "$cached_at" -gt 0 ] && [ "$health_now" -ge "$cached_at" ] &&
+       [ $((health_now - cached_at)) -lt 3600 ] && public_risk_address "$address" && [ "$address" != "$peer" ]; then
+      printf '%s|4' "$address"; return
+    fi
+  fi
+  # DNS stays HTTPS inside the selected tunnel. Split the original transport
+  # budget between a new resolution and the subsequent address request.
+  dns=$(tunnel_response 2 --resolve "cloudflare-dns.com:443:$probe_primary" \
+    -H 'accept: application/dns-json' 'https://cloudflare-dns.com/dns-query?name=api.ipify.org&type=A') || return 1
+  [ "$(json_field "$dns" Status integer)" = 0 ] && [ "$(json_field "$dns" TC bool)" = false ] &&
+    [ "$(json_field "$dns" Question.0.type integer)" = 1 ] || return 1
+  question=$(json_field "$dns" Question.0.name string) || return 1
+  case "$question" in api.ipify.org|api.ipify.org.) :;; *) return 1;; esac
+  for answer in 0 1 2 3 4 5 6 7; do
+    type=$(json_field "$dns" "Answer.$answer.type" integer) || return 1
+    [ "$type" = 1 ] || continue
+    address=$(json_field "$dns" "Answer.$answer.data" string) || return 1
+    if public_risk_address "$address" && [ "$address" != "$peer" ]; then
+      printf '%s|%s\n' "$address" "$health_now" > "$health_cache_file.tmp" &&
+        /bin/mv -f "$health_cache_file.tmp" "$health_cache_file" || return 1
+      printf '%s|2' "$address"; return
+    fi
+  done
+  return 1
 }
 
 resolve_risk_api() {
@@ -855,6 +939,15 @@ EOF
 }
 
 renew_risk_evidence() {
+  if [ "$probe_region_source" = accepted-cache ]; then
+    if [ "$phase" = OPEN ] && risk_fresh "$(/bin/date +%s)"; then
+      reason=risk-refresh-pending
+    else
+      load_phase LOCKED || return 1
+      phase=LOCKED; reset_stability; reason=evidence-expired
+    fi
+    return 0
+  fi
   risk_reason=risk-unavailable
   if [ "$last_probe" -ge "$risk_attempt_at" ] && [ $((last_probe - risk_attempt_at)) -ge "$risk_retry_seconds" ]; then
     risk_attempt_at=$last_probe
@@ -1384,6 +1477,7 @@ PLIST
           desired=OPEN
           reason=probe-ok
           if [ "$probe_used" = "$probe_backup" ]; then reason=probe-backup; fi
+          if [ "$probe_used" = independent ]; then reason=probe-independent; fi
         else
           gap=$((probe_observed_at - last_verified))
           if [ "$consecutive" -eq 0 ] || [ "$gap" -lt 0 ] || [ "$gap" -gt "$stability_max_gap" ]; then

@@ -78,6 +78,7 @@ enum GuardCopy {
     static let reasons: [String: GuardText] = [
         "preflight": GuardText("Checking the system packet filter and the selected tunnel."),
         "probe-ok": GuardText("The approved exit was verified through the selected tunnel."),
+        "probe-independent": GuardText("An independent HTTPS provider verified the approved exit. Accepted region and risk evidence keep their original expiry."),
         "stable-open": GuardText("Six checks passed over at least 15 seconds. Apps may use the tunnel."),
         "settling": GuardText("The VPN is connected. App traffic stays blocked while the tunnel and approved exit are being verified."),
         "route-changed": GuardText("A visible network route changed. Apps remain blocked while validation restarts."),

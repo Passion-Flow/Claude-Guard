@@ -20,6 +20,8 @@ jobs:
         run: /usr/bin/python3 -I Tests/guard_worker_fixture.py --cadence
       - name: Check concurrent health observation and cancellation
         run: /usr/bin/python3 -I Tests/health_probe_fixture.py
+      - name: Check independent address continuity without extending admission
+        run: /usr/bin/python3 -I Tests/independent_health_fixture.py
       - name: Check privileged control lifecycle without system changes
         run: /usr/bin/python3 -I Tests/guardian_core_fixture.py
       - name: Check native power and packet-writer boundaries without system changes

@@ -223,6 +223,7 @@
 "Risk check in progress" = "正在检查风险";
 "Risk policy denied release" = "风险策略拒绝放行";
 "Risk evidence unavailable" = "风险证据尚未确认";
+"An independent HTTPS provider verified the approved exit. Accepted region and risk evidence keep their original expiry." = "独立 HTTPS 服务已核对批准的出口。已接受的地区和风险证据仍按原有效期到期。";
 "Resume protection" = "恢复保护";
 "Pause protection" = "暂停放行";
 "Startup protection follows confirmation." = "确认持续保护后自动启用开机恢复。";

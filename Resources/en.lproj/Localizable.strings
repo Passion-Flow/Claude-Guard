@@ -223,6 +223,7 @@
 "Risk check in progress" = "Risk check in progress";
 "Risk policy denied release" = "Risk policy denied release";
 "Risk evidence unavailable" = "Risk evidence unavailable";
+"An independent HTTPS provider verified the approved exit. Accepted region and risk evidence keep their original expiry." = "An independent HTTPS provider verified the approved exit. Accepted region and risk evidence keep their original expiry.";
 "Resume protection" = "Resume protection";
 "Pause protection" = "Pause protection";
 "Startup protection follows confirmation." = "Startup protection follows confirmation.";
