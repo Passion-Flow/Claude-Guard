@@ -216,6 +216,10 @@
 "Required risk evidence is unavailable. App traffic remains blocked." = "必要的风险证据不可用，应用流量继续拦截。";
 "Protection is paused. Ordinary traffic stays blocked. Resume protection or restore networking locally." = "已暂停放行，普通流量仍被拦截。可恢复保护，或在本机解除网络限制。";
 "Risk check passed" = "风险检查已通过";
+"Risk refresh pending" = "风险数据等待刷新";
+"Risk refresh is pending. The original accepted evidence remains valid only until its existing expiry." = "风险数据正在等待刷新。原有已通过的证据仅在原定到期时间前有效。";
+"The local daily risk-query allowance is exhausted. Fresh evidence is required before release." = "本机今日风险查询额度已用完。取得有效的新证据后才能放行。";
+"The saved risk-query state could not be validated. App traffic remains blocked." = "无法验证已保存的风险查询状态，应用流量保持拦截。";
 "Risk check in progress" = "正在检查风险";
 "Risk policy denied release" = "风险策略拒绝放行";
 "Risk evidence unavailable" = "风险证据尚未确认";

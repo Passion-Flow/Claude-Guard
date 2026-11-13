@@ -16,6 +16,7 @@ boot_mode=0
 probe_primary=1.1.1.1
 probe_backup=1.0.0.1
 identity_lease_seconds=12
+health_interval_seconds=2
 stability_seconds=15
 stability_samples=6
 stability_tick=3
@@ -43,6 +44,10 @@ last_observed=
 last_reason=
 evidence_context=
 probe_file=
+health_round=
+health_primary_pid=
+health_backup_pid=
+expected=
 risk_key=
 risk_region=
 risk_evaluator=
@@ -55,6 +60,7 @@ risk_attempt_at=0
 risk_max_age=3600
 risk_renew_age=2700
 risk_retry_seconds=60
+risk_daily_connections=48
 approved_deadline=0
 development_peer=
 development_binding=
@@ -311,10 +317,11 @@ unload_boot_job() {
 
 cleanup() {
   trap - EXIT HUP INT TERM
+  if [ "$owned" = 1 ] && [ "$restore_requested" = 0 ]; then enforce_seal || true; fi
+  cleanup_health_round
   discard_probe
   if [ "$owned" = 1 ] && [ "$restore_requested" = 0 ]; then
     # Exit traps run on ordinary errors too. Leave the block in force on faults.
-    enforce_seal || true
     publish ERROR "-" worker-stopped || true
     return
   fi
@@ -419,12 +426,16 @@ underlay_ifaces() {
     /usr/bin/sort -u | /usr/bin/tr '\n' ' ' | /usr/bin/sed 's/ $//'
 }
 
-reset_stability() {
+reset_identity_stability() {
   stable_since=0
   consecutive=0
   missed_round=0
   last_verified=0
   evidence_context=
+}
+
+reset_stability() {
+  reset_identity_stability
   risk_checked_at=0
   risk_context=
 }
@@ -437,11 +448,15 @@ identity_fresh() {
 
 guard_sleep() {
   # The health check can wait. A damaged filter cannot.
-  guard_left=$1
-  while [ "$guard_left" -gt 0 ]; do
-    /bin/sleep 1
-    guard_left=$((guard_left - 1))
-    rules_intact || return 0
+  guard_began=$(/bin/date +%s)
+  guard_until=$((guard_began + $1))
+  if [ "$phase" = OPEN ]; then
+    # Count from the actual verified response, including filter and readback
+    # work already spent since it. Repeated sleeps do not define that interval.
+    guard_next_probe=$((last_verified + health_interval_seconds))
+    if [ "$guard_next_probe" -lt "$guard_until" ]; then guard_until=$guard_next_probe; fi
+  fi
+  while :; do
     sleep_now=$(/bin/date +%s)
     if [ "$phase" = OPEN ] && { ! identity_fresh "$sleep_now" || ! risk_fresh "$sleep_now"; }; then
       load_phase LOCKED || { drift=1; return 0; }
@@ -450,6 +465,9 @@ guard_sleep() {
       publish LOCKED "-" evidence-expired
       return 0
     fi
+    if [ "$sleep_now" -lt "$guard_began" ] || [ "$sleep_now" -ge "$guard_until" ]; then return 0; fi
+    /bin/sleep 1
+    rules_intact || return 0
     publish "$last_state" "$last_observed" "$last_reason"
   done
 }
@@ -522,23 +540,87 @@ tunnel_response() {
     discard_probe
 }
 
-sample_exit() {
-  # An actual different address is evidence. An unavailable response is not.
-  probe_used=
-  for probe in "$probe_primary" "$probe_backup"; do
-    result=$(tunnel_response 2 "https://$probe/cdn-cgi/trace") || continue
-    [ "${#result}" -le 4096 ] || continue
+parse_exit_response() {
+    result=$1
+    [ "${#result}" -le 4096 ] || return 1
     observed=$(printf '%s\n' "$result" | /usr/bin/awk '
       /^ip=/ { count++; address=substr($0, 4) }
-      END { if (count!=1) exit 1; print address }') || continue
+      END { if (count!=1) exit 1; print address }') || return 1
     observed_region=$(printf '%s\n' "$result" | /usr/bin/awk '
       /^loc=/ { count++; region=substr($0, 5) }
       END { if (count!=1 || region !~ /^[A-Z][A-Z]$/) exit 1; print region }') || observed_region=
-    if valid_ip "$observed"; then
-      probe_used=$probe
-      return 0
+    valid_ip "$observed"
+}
+
+cleanup_health_round() {
+  # Both HTTPS children have a four-second total request deadline. Drain them
+  # before deleting their private files; a signal cannot leave overlapping rounds.
+  if [ -n "$health_primary_pid" ]; then wait "$health_primary_pid" 2>/dev/null || true; fi
+  if [ -n "$health_backup_pid" ]; then wait "$health_backup_pid" 2>/dev/null || true; fi
+  health_primary_pid=
+  health_backup_pid=
+  if [ -n "$health_round" ]; then /bin/rm -rf -- "$health_round"; health_round=; fi
+}
+
+sample_exit() {
+  probe_used=
+  probe_observed_at=0
+  health_round=$(/usr/bin/mktemp -d "$directory/health.XXXXXX") || return 1
+  /bin/mkdir -m 0700 "$health_round/primary" "$health_round/backup" || { cleanup_health_round; return 1; }
+  # Give legitimate TLS setup the whole round budget without adding two
+  # serial deadlines. Each child has separate output and transport metadata.
+  (
+    trap - EXIT HUP INT TERM
+    directory="$health_round/primary"
+    if tunnel_response 4 "https://$probe_primary/cdn-cgi/trace" > "$health_round/primary.trace"; then
+      /bin/date +%s > "$health_round/primary.stamp"
     fi
+  ) &
+  health_primary_pid=$!
+  (
+    trap - EXIT HUP INT TERM
+    directory="$health_round/backup"
+    if tunnel_response 4 "https://$probe_backup/cdn-cgi/trace" > "$health_round/backup.trace"; then
+      /bin/date +%s > "$health_round/backup.stamp"
+    fi
+  ) &
+  health_backup_pid=$!
+  wait "$health_primary_pid" || true
+  wait "$health_backup_pid" || true
+  health_primary_pid=
+  health_backup_pid=
+  chosen_observed=
+  chosen_region=
+  chosen_probe=
+  chosen_stamp=0
+  for label in primary backup; do
+    [ -f "$health_round/$label.stamp" ] || continue
+    stamp=$(/bin/cat "$health_round/$label.stamp") || continue
+    case "$stamp" in ''|*[!0-9]*) continue;; esac
+    [ "${#stamp}" -le 12 ] && [ "$stamp" -gt 0 ] || continue
+    result=$(/bin/cat "$health_round/$label.trace") || continue
+    parse_exit_response "$result" || continue
+    if [ -z "$chosen_observed" ] || [ "$stamp" -gt "$chosen_stamp" ] ||
+       { [ -n "$expected" ] && [ "$observed" != "$expected" ]; } ||
+       { [ -z "$risk_key" ] && [ -n "$risk_region" ] && [ "$observed_region" != "$risk_region" ]; }; then
+      chosen_observed=$observed
+      chosen_region=$observed_region
+      chosen_stamp=$stamp
+      case "$label" in primary) chosen_probe=$probe_primary;; backup) chosen_probe=$probe_backup;; esac
+    fi
+    # A corroborated different exit is rejecting evidence, even when the other
+    # endpoint succeeds. Never turn a mismatch into an availability fallback.
+    if { [ -n "$expected" ] && [ "$observed" != "$expected" ]; } ||
+       { [ -z "$risk_key" ] && [ -n "$risk_region" ] && [ "$observed_region" != "$risk_region" ]; }; then break; fi
   done
+  cleanup_health_round
+  if [ -n "$chosen_observed" ]; then
+    observed=$chosen_observed
+    observed_region=$chosen_region
+    probe_used=$chosen_probe
+    probe_observed_at=$chosen_stamp
+    return 0
+  fi
   observed=-
   return 1
 }
@@ -552,6 +634,11 @@ risk_fresh() {
   [ "$risk_checked_at" -gt 0 ] && [ "$1" -ge "$risk_checked_at" ] &&
     [ $(($1 - risk_checked_at)) -lt "$risk_max_age" ] &&
     [ "$risk_context" = "$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path|$risk_region" ]
+}
+
+risk_review_due() {
+  if ! risk_fresh "$1"; then return 0; fi
+  [ $(($1 - risk_checked_at)) -ge "$risk_renew_age" ]
 }
 
 json_field() {
@@ -588,10 +675,62 @@ resolve_risk_api() {
   return 1
 }
 
+risk_write_attempt() {
+  printf '%s|%s\n' "$risk_now" "$1" > "$directory/risk-last-attempt.tmp" &&
+    /bin/mv -f "$directory/risk-last-attempt.tmp" "$directory/risk-last-attempt"
+}
+
+risk_attempt_ready() {
+  [ -f "$directory/risk-last-attempt" ] || return 0
+  previous_record=$(/bin/cat "$directory/risk-last-attempt") || return 1
+  case "$previous_record" in
+    *'|'*) IFS='|' read -r previous_attempt previous_delay previous_extra <<EOF
+$previous_record
+EOF
+      [ -z "$previous_extra" ] && [ "$previous_record" = "$previous_attempt|$previous_delay" ] || return 1;;
+    *) previous_attempt=$previous_record; previous_delay=$risk_renew_age;;
+  esac
+  case "$previous_attempt" in ''|*[!0-9]*) return 1;; esac
+  case "$previous_delay" in 300|900|2700) :;; *) return 1;; esac
+  [ "${#previous_attempt}" -le 12 ] && [ "$risk_now" -ge "$previous_attempt" ] &&
+    [ $((risk_now - previous_attempt)) -ge "$previous_delay" ]
+}
+
+risk_charge_connection() {
+  # Anonymous allowance is shared at the exit. This conservative local ceiling
+  # survives worker restarts, reboots and upgrades. Charge before each request,
+  # even if transport subsequently fails before receiving HTTP.
+  budget_today=$(/bin/date -u +%Y%m%d) || { risk_issue=risk-invalid-state; return 1; }
+  case "$budget_today" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) :;; *) risk_issue=risk-invalid-state; return 1;; esac
+  budget_count=0
+  if [ -f "$boot_dir/risk-query-budget" ]; then
+    budget_record=$(/bin/cat "$boot_dir/risk-query-budget") || { risk_issue=risk-invalid-state; return 1; }
+    IFS='|' read -r budget_day budget_count budget_extra <<EOF
+$budget_record
+EOF
+    case "$budget_day" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) :;; *) risk_issue=risk-invalid-state; return 1;; esac
+    case "$budget_count" in 0|[1-9]|[1-4][0-9]) :;; *) risk_issue=risk-invalid-state; return 1;; esac
+    if [ -n "$budget_extra" ] || [ "$budget_record" != "$budget_day|$budget_count" ] ||
+       [ "${#budget_count}" -gt 2 ] || [ "$budget_count" -gt "$risk_daily_connections" ] ||
+       [ "$budget_day" -gt "$budget_today" ]; then risk_issue=risk-invalid-state; return 1; fi
+    if [ "$budget_day" -lt "$budget_today" ]; then budget_count=0; fi
+  fi
+  [ "$budget_count" -lt "$risk_daily_connections" ] || { risk_issue=risk-query-budget; return 1; }
+  printf '%s|%s\n' "$budget_today" "$((budget_count + 1))" > "$boot_dir/risk-query-budget.tmp" &&
+    /bin/mv -f "$boot_dir/risk-query-budget.tmp" "$boot_dir/risk-query-budget" ||
+    { risk_issue=risk-invalid-state; return 1; }
+}
+
+risk_cache_response() {
+  { printf '%s|%s|%s\n' "$risk_now" "$observed" "$risk_region"; printf '%s' "$response"; } > "$directory/risk-cache.tmp" &&
+    /bin/mv -f "$directory/risk-cache.tmp" "$directory/risk-cache"
+}
+
 review_exit_risk() {
   risk_admission_at=
   risk_issue=risk-unavailable
   [ -x "$risk_evaluator" ] || return 2
+  risk_now=$(/bin/date +%s)
   if [ -n "$risk_key" ]; then
     valid_risk_key "$risk_key" || return 2
     risk_host=www.ipqualityscore.com
@@ -599,53 +738,77 @@ review_exit_risk() {
     risk_host=proxycheck.io
     case "$observed_region" in [A-Z][A-Z]) :;; *) return 2;; esac
     [ "$observed_region" = "$risk_region" ] || return 1
-    # Anonymous service quotas are shared by the exit. Reuse only a recent,
-    # exact-address response, and persist attempt spacing across worker restarts.
-    risk_now=$(/bin/date +%s)
     if [ -f "$directory/risk-cache" ]; then
       cached_header=$(/usr/bin/head -n 1 "$directory/risk-cache")
-      IFS='|' read -r cached_at cached_exit cached_region <<EOF
+      IFS='|' read -r cached_at cached_exit cached_region cached_extra <<EOF
 $cached_header
 EOF
       case "$cached_at" in ''|*[!0-9]*) cached_at=0;; esac
-      if [ "${#cached_at}" -le 12 ] && [ "$risk_now" -ge "$cached_at" ] &&
-         [ $((risk_now - cached_at)) -lt 3600 ] && [ "$cached_exit" = "$observed" ] &&
+      if [ -z "$cached_extra" ] && [ "$cached_header" = "$cached_at|$cached_exit|$cached_region" ] &&
+         [ "${#cached_at}" -le 12 ] && [ "$cached_at" -gt 0 ] && [ "$risk_now" -ge "$cached_at" ] &&
+         [ $((risk_now - cached_at)) -lt "$risk_max_age" ] && [ "$cached_exit" = "$observed" ] &&
          [ "$cached_region" = "$risk_region" ]; then
         if { printf '%s|%s|%s\n' "$risk_region" "$observed" "$observed_region"; /usr/bin/tail -n +2 "$directory/risk-cache"; } |
-            "$risk_evaluator" --validate-keyless-risk; then risk_admission_at=$cached_at; return 0
-        else cached_result=$?; risk_issue=risk-invalid-response; return "$cached_result"; fi
+            "$risk_evaluator" --validate-keyless-risk; then
+          # OPEN proactively queries new evidence at 45 minutes. A locked
+          # reconnect may use the original unexpired response after fresh dwell.
+          if [ "$phase" != OPEN ] || [ $((risk_now - cached_at)) -lt "$risk_renew_age" ]; then
+            risk_admission_at=$cached_at
+            return 0
+          fi
+        else
+          cached_result=$?
+          if [ "$cached_result" = 1 ]; then
+            [ $((risk_now - cached_at)) -ge 900 ] || return 1
+          else
+            /bin/rm -f "$directory/risk-cache"
+            risk_issue=risk-invalid-response
+            return 2
+          fi
+        fi
       fi
     fi
-    if [ -f "$directory/risk-last-attempt" ]; then
-      previous_attempt=$(/bin/cat "$directory/risk-last-attempt")
-      case "$previous_attempt" in ''|*[!0-9]*) return 2;; esac
-      [ "${#previous_attempt}" -le 12 ] && [ "$risk_now" -ge "$previous_attempt" ] &&
-        [ $((risk_now - previous_attempt)) -ge 3600 ] || { risk_issue=risk-rate-limited; return 2; }
+    # This short spacing includes DNS failures and survives worker restart.
+    # It never changes the accepted cache's original timestamp.
+    if [ -f "$directory/risk-last-refresh" ]; then
+      previous_refresh=$(/bin/cat "$directory/risk-last-refresh")
+      case "$previous_refresh" in ''|*[!0-9]*) risk_issue=risk-invalid-state; return 2;; esac
+      [ "${#previous_refresh}" -le 12 ] && [ "$risk_now" -ge "$previous_refresh" ] &&
+        [ $((risk_now - previous_refresh)) -ge "$risk_retry_seconds" ] ||
+        { risk_issue=risk-rate-limited; return 2; }
     fi
+    risk_attempt_ready || { risk_issue=risk-rate-limited; return 2; }
+    printf '%s\n' "$risk_now" > "$directory/risk-last-refresh.tmp" &&
+      /bin/mv -f "$directory/risk-last-refresh.tmp" "$directory/risk-last-refresh" ||
+      { risk_issue=risk-invalid-state; return 2; }
   fi
   risk_address=$(resolve_risk_api) || { risk_issue=risk-dns-unavailable; return 2; }
   if [ "$phase" = LOCKED ]; then
     risk_api_ip=$risk_address
     if ! load_phase LOCKED; then risk_api_ip=; return 3; fi
   fi
-  [ -n "$risk_key" ] || printf '%s\n' "$risk_now" > "$directory/risk-last-attempt"
   response=
+  risk_received=0
+  risk_http=000
+  risk_budget_failed=0
   # Credentials and the queried exit are supplied through stdin, never argv.
   if [ -n "$risk_key" ]; then
     request=$(printf 'url = "https://%s/api/json/ip?ip=%s&strictness=1&allow_public_access_points=false&lighter_penalties=false"\nheader = "IPQS-KEY: %s"\n' "$risk_host" "$observed" "$risk_key")
   else
     request=$(printf 'url = "https://%s/v3/%s?ver=24-June-2026&tag=0"\n' "$risk_host" "$observed")
   fi
-  # A transient connection failure must not make the first anonymous attempt
-  # the sole chance for an entire hour. At most three connections share this
-  # one persisted hourly budget. Retry only without an HTTP response, only
-  # while ordinary traffic is already LOCKED. An HTTP error (including quota
-  # responses), malformed body or negative verdict never triggers this retry.
+  # A locked admission batch alone may retry connection-only failures. HTTP
+  # failures wait at least five minutes; quota responses wait fifteen minutes.
+  # Healthy cache admission schedules the next lookup after forty-five minutes.
   for risk_connection in 1 2 3; do
+    if [ -z "$risk_key" ]; then
+      if ! risk_charge_connection || ! risk_write_attempt 300; then risk_budget_failed=1; break; fi
+    fi
     /bin/rm -f "$directory/transport-status"
     if [ "$phase" = LOCKED ]; then publish LOCKED "-" risk-review; fi
     if body=$(printf '%s\n' "$request" | tunnel_response 4 --resolve "$risk_host:443:$risk_address" --config -); then
       response=$body
+      risk_received=1
       break
     fi
     risk_http=$(/bin/cat "$directory/transport-status" 2>/dev/null || printf '000')
@@ -656,18 +819,110 @@ EOF
     risk_api_ip=
     load_phase LOCKED || return 3
   fi
-  [ -n "$response" ] || { risk_issue=risk-provider-unavailable; return 2; }
+  [ "$risk_budget_failed" = 0 ] || return 2
+  if [ "$risk_received" = 0 ]; then
+    if [ "$risk_http" = 200 ]; then
+      /bin/rm -f "$directory/risk-cache"
+      risk_issue=risk-invalid-response
+    elif [ "$risk_http" = 429 ]; then
+      if [ -z "$risk_key" ]; then risk_write_attempt 900 || return 2; fi
+      risk_issue=risk-rate-limited
+    else
+      if [ -z "$risk_key" ] && [ "$phase" = OPEN ] && [ "$risk_http" = 000 ]; then
+        /bin/rm -f "$directory/risk-last-attempt"
+      fi
+      risk_issue=risk-provider-unavailable
+    fi
+    return 2
+  fi
   if [ -n "$risk_key" ]; then
     if printf '%s' "$response" | "$risk_evaluator" --validate-risk "$risk_region"; then return 0; else risk_result=$?; fi
   else
     if printf '%s|%s|%s\n%s' "$risk_region" "$observed" "$observed_region" "$response" | "$risk_evaluator" --validate-keyless-risk; then
-      { printf '%s|%s|%s\n' "$risk_now" "$observed" "$risk_region"; printf '%s' "$response"; } > "$directory/risk-cache.tmp"
-      /bin/mv -f "$directory/risk-cache.tmp" "$directory/risk-cache"
+      risk_cache_response && risk_write_attempt 2700 || { risk_issue=risk-invalid-state; return 2; }
       risk_admission_at=$risk_now
       return 0
     else risk_result=$?; fi
+    if [ "$risk_result" = 1 ]; then
+      # Replace a previous clean response with the actual rejection. A worker
+      # restart must never resurrect that previous response.
+      risk_cache_response && risk_write_attempt 900 || { risk_issue=risk-invalid-state; return 2; }
+    else
+      /bin/rm -f "$directory/risk-cache"
+    fi
   fi
   case "$risk_result" in 1) return 1;; *) risk_issue=risk-invalid-response; return 2;; esac
+}
+
+renew_risk_evidence() {
+  risk_reason=risk-unavailable
+  if [ "$last_probe" -ge "$risk_attempt_at" ] && [ $((last_probe - risk_attempt_at)) -ge "$risk_retry_seconds" ]; then
+    risk_attempt_at=$last_probe
+    publish "$phase" "$observed" risk-review
+    if review_exit_risk; then
+      risk_checked_at=${risk_admission_at:-$(/bin/date +%s)}
+      risk_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path|$risk_region"
+      risk_attempt_at=0
+    else
+      risk_result=$?
+      case "$risk_result" in
+        1) risk_reason=risk-rejected; risk_checked_at=0; risk_context=;;
+        2)
+          risk_reason=${risk_issue:-risk-unavailable}
+          case "$risk_reason" in
+            risk-dns-unavailable|risk-provider-unavailable|risk-rate-limited|risk-query-budget) :;;
+            *) risk_checked_at=0; risk_context=;;
+          esac;;
+        *) return 3;;
+      esac
+    fi
+  fi
+  renewal_now=$(/bin/date +%s)
+  if ! risk_fresh "$renewal_now"; then
+    reset_stability
+    desired=LOCKED
+    reason=$risk_reason
+  elif [ "$(underlay_snapshot || true)" != "$bound_path" ] ||
+       [ "$(vpn_connection "$vpn_service" || true)" != "Connected $iface" ] ||
+       [ -n "$(probe_route_reason)" ]; then
+    reset_stability
+    desired=SEALED
+    reason=route-changed
+  elif [ "$phase" = OPEN ]; then
+    # Risk cannot refresh identity. Do not spend another HTTPS deadline while
+    # OPEN; the existing observation must still be fresh after all renewal work.
+    if ! identity_fresh "$(/bin/date +%s)"; then
+      reset_stability
+      desired=LOCKED
+      reason=evidence-expired
+    elif risk_review_due "$(/bin/date +%s)"; then
+      reason=risk-refresh-pending
+    fi
+  else
+    post_risk_previous_verified=$last_verified
+    if ! sample_exit; then
+      reset_stability
+      desired=LOCKED
+      reason=probe-failed
+    elif [ "$observed" != "$expected" ] ||
+         { [ -z "$risk_key" ] && [ "$observed_region" != "$risk_region" ]; }; then
+      reset_stability
+      desired=LOCKED
+      reason=exit-mismatch
+    else
+      post_risk_gap=$((probe_observed_at - post_risk_previous_verified))
+      if [ "$post_risk_gap" -lt 0 ] || [ "$post_risk_gap" -gt "$stability_max_gap" ]; then
+        reset_identity_stability
+        stable_since=$probe_observed_at
+        consecutive=1
+        desired=LOCKED
+        reason=settling
+      fi
+      last_probe=$(/bin/date +%s)
+      last_verified=$probe_observed_at
+      evidence_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
+    fi
+  fi
 }
 
 action=${1-}
@@ -1034,7 +1289,7 @@ PLIST
           reason=revalidating
           if [ -n "$bound_path" ] && [ "$path" != "$bound_path" ]; then reason=route-changed; fi
           if [ "$phase" = SEALED ] || [ "$candidate" != "$iface" ] || [ "$reason" = route-changed ] ||
-             { [ "$phase" = OPEN ] && { [ $((now - last_probe)) -gt 10 ] || [ "$now" -lt "$last_probe" ]; }; }; then
+             { [ "$phase" = OPEN ] && ! identity_fresh "$now"; }; then
             iface=$candidate
             phase=LOCKED
             reset_stability
@@ -1119,7 +1374,8 @@ PLIST
       fi
       desired=LOCKED
       reason=probe-failed
-      if [ "$probe_ok" = 1 ] && [ "$observed" = "$expected" ]; then
+      if [ "$probe_ok" = 1 ] && [ "$observed" = "$expected" ] &&
+         { [ -n "$risk_key" ] || [ "$observed_region" = "$risk_region" ]; }; then
         recovery_link_lost=0
         recovery_probe_misses=0
         missed_round=0
@@ -1129,14 +1385,14 @@ PLIST
           reason=probe-ok
           if [ "$probe_used" = "$probe_backup" ]; then reason=probe-backup; fi
         else
-          gap=$((last_probe - last_verified))
+          gap=$((probe_observed_at - last_verified))
           if [ "$consecutive" -eq 0 ] || [ "$gap" -lt 0 ] || [ "$gap" -gt "$stability_max_gap" ]; then
-            stable_since=$last_probe
+            stable_since=$probe_observed_at
             consecutive=0
           fi
           consecutive=$((consecutive + 1))
           reason=settling
-          if [ "$consecutive" -ge "$stability_samples" ] && [ $((last_probe - stable_since)) -ge "$stability_seconds" ]; then
+          if [ "$consecutive" -ge "$stability_samples" ] && [ $((probe_observed_at - stable_since)) -ge "$stability_seconds" ]; then
             # Validate the boundary again after the last network probe, before exposing ordinary traffic.
             if ! rules_intact; then
               drift=1
@@ -1150,7 +1406,7 @@ PLIST
             retry_delay=3
           fi
         fi
-        last_verified=$last_probe
+        last_verified=$probe_observed_at
         evidence_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
       elif [ "$probe_ok" = 1 ]; then
         recovery_link_lost=0
@@ -1185,43 +1441,8 @@ PLIST
         fi
         reset_stability
       fi
-      if [ "$desired" = OPEN ] && { ! risk_fresh "$last_probe" || [ $((last_probe - risk_checked_at)) -ge "$risk_renew_age" ]; }; then
-        risk_reason=risk-unavailable
-        if [ "$last_probe" -lt "$risk_attempt_at" ] || [ $((last_probe - risk_attempt_at)) -ge "$risk_retry_seconds" ]; then
-          risk_attempt_at=$last_probe
-          publish "$phase" "$observed" risk-review
-          if review_exit_risk; then
-            risk_checked_at=${risk_admission_at:-$(/bin/date +%s)}
-            risk_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path|$risk_region"
-            risk_attempt_at=0
-          else
-            risk_result=$?
-            risk_checked_at=0
-            case "$risk_result" in 1) risk_reason=risk-rejected;; 2) risk_reason=${risk_issue:-risk-unavailable};; *) drift=1; continue;; esac
-          fi
-        fi
-        if ! risk_fresh "$(/bin/date +%s)"; then
-          reset_stability
-          desired=LOCKED
-          reason=$risk_reason
-        elif [ "$(underlay_snapshot || true)" != "$bound_path" ] ||
-             [ "$(vpn_connection "$vpn_service" || true)" != "Connected $iface" ] ||
-             [ -n "$(probe_route_reason)" ]; then
-          reset_stability
-          desired=SEALED
-          reason=route-changed
-        elif ! sample_exit; then
-          reset_stability
-          desired=LOCKED
-          reason=probe-failed
-        elif [ "$observed" != "$expected" ]; then
-          reset_stability
-          desired=LOCKED
-          reason=exit-mismatch
-        else
-          last_verified=$(/bin/date +%s)
-          evidence_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
-        fi
+      if [ "$desired" = OPEN ] && risk_review_due "$last_probe"; then
+        renew_risk_evidence || { drift=1; continue; }
       fi
       # No request can carry an old decision across a route change, clock jump,
       # trial deadline or an expired admission lease, including the post-risk probe.

@@ -216,6 +216,10 @@
 "Required risk evidence is unavailable. App traffic remains blocked." = "Required risk evidence is unavailable. App traffic remains blocked.";
 "Protection is paused. Ordinary traffic stays blocked. Resume protection or restore networking locally." = "Protection is paused. Ordinary traffic stays blocked. Resume protection or restore networking locally.";
 "Risk check passed" = "Risk check passed";
+"Risk refresh pending" = "Risk refresh pending";
+"Risk refresh is pending. The original accepted evidence remains valid only until its existing expiry." = "Risk refresh is pending. The original accepted evidence remains valid only until its existing expiry.";
+"The local daily risk-query allowance is exhausted. Fresh evidence is required before release." = "The local daily risk-query allowance is exhausted. Fresh evidence is required before release.";
+"The saved risk-query state could not be validated. App traffic remains blocked." = "The saved risk-query state could not be validated. App traffic remains blocked.";
 "Risk check in progress" = "Risk check in progress";
 "Risk policy denied release" = "Risk policy denied release";
 "Risk evidence unavailable" = "Risk evidence unavailable";

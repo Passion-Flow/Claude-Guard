@@ -282,11 +282,13 @@ final class GuardController: ObservableObject {
     var mayPause: Bool { active && !paused && status?.mode == "live" && !busy }
 
     var riskStatus: GuardText {
+        if status?.reason == "risk-refresh-pending" { return GuardText("Risk refresh pending") }
+        if status?.reason == "risk-review" { return GuardText("Risk check in progress") }
         if isOpen { return GuardText("Risk check passed") }
         switch status?.reason {
         case "risk-review": return GuardText("Risk check in progress")
         case "risk-rejected": return GuardText("Risk policy denied release")
-        case "risk-rate-limited": return GuardText("Risk check deferred")
+        case "risk-rate-limited", "risk-query-budget": return GuardText("Risk check deferred")
         default: return GuardText("Risk evidence unavailable")
         }
     }
@@ -498,13 +500,25 @@ final class GuardController: ObservableObject {
         let revalidation = revalidationRoute
         Task { [self] in
             do {
-                let result = try await Task.detached { () -> AutomaticRoute? in
-                    if currentActive, !rediscover, let fingerprint,
-                       try ShadowrocketAccess.readCurrent().fingerprint == fingerprint { return nil }
-                    return try AutomaticRoute.read(region: region, revalidation: revalidation)
+                let observation = try await Task.detached { () -> (AutomaticRoute?, ShadowrocketProfile?) in
+                    if currentActive, !rediscover, let fingerprint {
+                        let profile = try ShadowrocketAccess.readCurrent()
+                        if profile.fingerprint == fingerprint { return (nil, profile) }
+                    }
+                    return (try AutomaticRoute.read(region: region, revalidation: revalidation), nil)
                 }.value
                 defer { automaticChecking = false }
                 guard generation == automaticGeneration, !paused, (force || automaticEnabled) else { return }
+                if let profile = observation.1, let route = revalidation,
+                   route.peer == profile.host, route.port == String(profile.port), route.transport == profile.transport {
+                    // Refresh display metadata after an app restart without
+                    // submitting activation or rotating a healthy root session.
+                    configuration = GuardConfiguration(peer: route.peer, port: route.port,
+                        transport: route.transport, expected: route.expected, interface: route.interface,
+                        approvedRegion: route.region)
+                    reviewedTransports[route.endpointKey] = profile.security
+                }
+                let result = observation.0
                 guard let result else {
                     if isOpen { clearRecoveredAutomaticIssue() }
                     return

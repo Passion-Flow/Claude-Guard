@@ -6,11 +6,14 @@ import os
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
 
 SOURCE = Path(__file__).resolve().parents[1] / "Sources" / "GuardWorker.sh"
+assert sys.argv[1:] in ([], ['--cadence'], ['--cadence-baseline'])
+CADENCE = bool(sys.argv[1:])
 
 with tempfile.TemporaryDirectory(prefix="cg-worker-test-") as work:
     root = Path(work)
@@ -18,10 +21,11 @@ with tempfile.TemporaryDirectory(prefix="cg-worker-test-") as work:
     mock = root / "pfctl"
     mock.write_text("""#!/usr/bin/python3
 from pathlib import Path
-import sys
+import sys,time
 root = Path(__file__).parent
 args = sys.argv[1:]
 rules = root / 'rules'
+if (root / 'cadence').exists() and '-sr' in args: time.sleep(.15)
 if args == ['-sr']:
     print((root / 'main').read_text(), end='')
 elif args == ['-s', 'info']:
@@ -66,10 +70,11 @@ else:
     filter_helper = root / "filter-helper"
     filter_helper.write_text('''#!/usr/bin/python3
 from pathlib import Path
-import subprocess,sys
+import subprocess,sys,time
 root=Path(__file__).parent
 args=sys.argv[1:]
 body=sys.stdin.buffer.read()
+if (root/'cadence').exists() and args[:1]==['--filter-load'] and args[-1:] == ['OPEN']: time.sleep(1)
 if args[0]=='--filter-adopt' and len(args)==2:
     known=root/'native-last-rules'
     actual=root/'rules'
@@ -137,11 +142,15 @@ assert args[args.index('--interface') + 1].startswith('if!utun')
 assert args[args.index('--proto') + 1] == '=https' and '--tlsv1.2' in args
 assert args[args.index('--write-out') + 1] == '%{http_code}'
 output = Path(args[args.index('--output') + 1])
-assert output.parent == root / 'runtime'
+relative = output.relative_to(root / 'runtime')
+assert len(relative.parts) == 1 or (len(relative.parts) == 3 and relative.parts[0].startswith('health.') and relative.parts[1] in ('primary','backup'))
 assert os.environ['HOME'] == '/var/empty'
 assert not any(name in os.environ for name in ('CURL_HOME', 'CURL_CA_BUNDLE', 'HTTPS_PROXY'))
 import json
 if '--config' in args:
+    if (root / 'cadence').exists():
+        import time
+        time.sleep(3)
     config = sys.stdin.read()
     assert 'FixtureRiskKey0123456789' not in ' '.join(args)
     assert 'IPQS-KEY: FixtureRiskKey0123456789' in config
@@ -169,17 +178,26 @@ if 'cloudflare-dns.com:443:1.1.1.1' in args:
     sys.exit(0)
 address = sys.argv[-1].split('/')[2]
 assert address in ('1.1.1.1', '1.0.0.1')
-jump = root / 'jump-during-probe'
-if jump.exists():
-    clock = root / 'clock-offset'
-    clock.write_text(str((int(clock.read_text()) if clock.exists() else 0) + int(jump.read_text())))
-    jump.unlink()
 name = 'primary' if address == '1.1.1.1' else 'backup'
 with (root / 'probe-log').open('a') as log:
     print(name, file=log)
-drop = root / 'drop-next'
-if drop.exists() and int(drop.read_text()) > 0:
-    drop.write_text(str(int(drop.read_text()) - 1))
+import fcntl
+dropped = False
+with (root / 'probe-control.lock').open('a') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    jump = root / 'jump-during-probe'
+    if jump.exists():
+        clock = root / 'clock-offset'
+        clock.write_text(str((int(clock.read_text()) if clock.exists() else 0) + int(jump.read_text())))
+        jump.unlink()
+    drop = root / 'drop-next'
+    if drop.exists() and int(drop.read_text()) > 0:
+        drop.write_text(str(int(drop.read_text()) - 1))
+        dropped = True
+if dropped:
+    if (root / 'cadence').exists():
+        import time
+        time.sleep(4)
     sys.exit(28)
 override = root / name
 value = (override if override.exists() else root / 'exit').read_text().strip()
@@ -311,6 +329,16 @@ sys.exit(result.returncode)
     runtime.mkdir(mode=0o700)
 
     definitions = script.split('action=${1-}')[0]
+    expired_wait = definitions + '''
+phase=OPEN; last_verified=1
+load_phase() { printf '%s|' "$1"; }
+rules_intact() { exit 99; }
+publish() { printf '%s' "$3"; }
+guard_sleep 5
+'''
+    expired = subprocess.run(['/bin/sh', '-c', expired_wait], check=True,
+                             capture_output=True, text=True, timeout=2)
+    assert expired.stdout == 'LOCKED|evidence-expired'
     probe = definitions + '\niface=utun6\nif sample_exit; then printf "PASS:%s" "$observed"; else printf FAIL; fi\n'
     hostile = {**os.environ, 'CURL_HOME': str(root), 'CURL_CA_BUNDLE': str(root),
                'HTTPS_PROXY': 'http://127.0.0.1:9999'}
@@ -428,6 +456,12 @@ build_rules "$1"
             return process
         return subprocess.Popen(command, **options)
 
+    if CADENCE:
+        (root / 'cadence').touch()
+        # Keep the production sleep ceiling. The usual accelerated fixture
+        # cannot expose work accumulating across that production interval.
+        script = script.replace('guard_sleep 1', 'guard_sleep 5')
+
     # Run one full production observation window before using scaled times
     # for the remaining state-machine fixtures.
     production = ["/bin/sh", "-c", script, "claude-guard-worker"]
@@ -445,12 +479,36 @@ build_rules "$1"
         expect("OPEN", timeout=40)
         assert int(status()[2]) - first >= 15
         assert (root / "probe-log").read_text().count("primary") >= 6
+        if CADENCE:
+            if sys.argv[1:] == ['--cadence']:
+                (root / 'drop-next').write_text('2')
+            end = time.monotonic() + 30
+            failure = None
+            saw_retry = False
+            while time.monotonic() < end:
+                current = status()
+                saw_retry |= current[1] == 'OPEN' and current[6] == 'probe-retry'
+                if current[1] != 'OPEN':
+                    failure = current[1] + ':' + current[6]
+                    break
+                time.sleep(.1)
+            print('CADENCE_RESULT ' + (failure or 'continuous-open'), flush=True)
+            if sys.argv[1:] == ['--cadence-baseline']:
+                assert failure == 'LOCKED:revalidating', failure
+            else:
+                assert failure is None, failure
+                assert saw_retry, 'Bounded empty health round was not exercised'
         subprocess.run(production + ["stop"], check=True, capture_output=True)
         expect("IDLE")
+        assert not list(runtime.glob('health.*'))
     finally:
         if worker.poll() is None:
             worker.terminate()
         worker.communicate(timeout=8)
+
+    if CADENCE:
+        print('PASS: production cadence, bounded slow risk response and filter work without host changes')
+        raise SystemExit(0)
 
     scaled = script.replace("stability_seconds=15", "stability_seconds=4").replace(
         "stability_samples=6", "stability_samples=4"
@@ -538,6 +596,13 @@ build_rules "$1"
         expect("LOCKED", reason="exit-mismatch")
         assert "CG_TUNNEL" not in (root / "rules").read_text()
         (root / "primary").unlink()
+        expect("OPEN")
+
+        # A valid primary cannot hide a different exit from the concurrent backup.
+        (root / "backup").write_text("192.0.2.99")
+        expect("LOCKED", reason="exit-mismatch")
+        assert "CG_TUNNEL" not in (root / "rules").read_text()
+        (root / "backup").unlink()
         expect("OPEN")
 
         # Even without a VPN disconnect or utun change, switching the visible
