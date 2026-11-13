@@ -22,6 +22,8 @@ jobs:
         run: /usr/bin/python3 -I Tests/health_probe_fixture.py
       - name: Check independent address continuity without extending admission
         run: /usr/bin/python3 -I Tests/independent_health_fixture.py
+      - name: Check timely pending replies and actual authorization expiry
+        run: /usr/bin/python3 -I Tests/health_streaming_fixture.py
       - name: Check privileged control lifecycle without system changes
         run: /usr/bin/python3 -I Tests/guardian_core_fixture.py
       - name: Check native power and packet-writer boundaries without system changes

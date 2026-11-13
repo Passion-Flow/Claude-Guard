@@ -5,6 +5,8 @@ from pathlib import Path
 import plistlib
 import runpy
 import subprocess
+import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 for path in sorted((ROOT / 'Tests').glob('*.py')):
@@ -26,6 +28,37 @@ for invariant in ['identity_lease_seconds=12', 'stability_seconds=15', 'stabilit
                   "--noproxy '*'", "--proto '=https'", '--tlsv1.2']:
     assert invariant in instrumented, invariant
 assert instrumented.count('>> "$directory/curl-timings"') == 1
+
+# Exercise the transformed transport, including its original failure status.
+# Neither branch uses a real network or privileged policy operation.
+with tempfile.TemporaryDirectory(prefix='cg-harness-transport-') as temporary:
+    root = Path(temporary)
+    curl = root / 'curl'
+    curl.write_text('''#!/bin/sh
+output=
+while [ "$#" -gt 0 ]; do
+ if [ "$1" = --output ]; then output=$2; shift 2; else shift; fi
+done
+printf fixture-body > "$output"
+if [ -f "${0%/*}/fail" ]; then printf '000|0|0|0|0|0'; exit 28; fi
+printf '200|0.01|0.02|0.03|0.04|12345'
+''')
+    curl.chmod(0o700)
+    definitions = instrumented.split('action=${1-}')[0].replace('/usr/bin/curl', str(curl))
+    for fail in (False, True):
+        if fail:
+            (root / 'fail').touch()
+        command = definitions + '\ndirectory=' + str(root) + '''
+iface=utun1
+if tunnel_response 4 https://fixture.invalid > "$directory/body"; then code=0; else code=$?; fi
+printf '%s|%s|%s|%s' "$code" "$transport_exit" "$http_status" "$response_received_at"
+'''
+        result = subprocess.run(['/bin/sh', '-c', command], capture_output=True, text=True, check=True, timeout=10)
+        fields = result.stdout.split('|')
+        assert fields[:3] == (['1', '28', '000'] if fail else ['0', '0', '200']), fields
+        if not fail:
+            assert 0 <= time.time() - int(fields[3]) < 3
+        assert len((root / 'curl-timings').read_text().splitlines()) == 1 + int(fail)
 
 profile = runpy.run_path(str(ROOT / 'Tests/shadowrocket_numeric_test_profile.py'))
 selection = 'fixture-selected-profile'

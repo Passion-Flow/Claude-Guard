@@ -140,7 +140,7 @@ struct GuardWindow: View {
             Rectangle().fill(palette.line).frame(height: 1)
             GuardDropdown(tr("Language"), selection: $language, choices: GuardLanguage.allCases, palette: palette) { $0.name }
             GuardDropdown(tr("Appearance"), selection: $appearance, choices: GuardAppearance.allCases, palette: palette) { $0.title(language) }
-            Text("v" + GuardPolicy.version + " · " + tr("Beta"))
+            Text("v" + GuardPolicy.version + " (" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–") + ") · " + tr("Beta"))
                 .font(.caption.monospaced())
                 .foregroundStyle(palette.secondary)
         }

@@ -61,3 +61,9 @@ This PF implementation cannot guarantee protection before its startup job enforc
 The development-machine matrix is in Acceptance.md. A clean target runs automatic setup and startup checks; it must still report any unsupported profile or failed live admission. Offline fixtures and another machine's results cannot establish every target environment's behavior.
 
 Developers need the Xcode command-line tools, Python 3 and Node for the browser fixture. Run `./build.sh`, the Python fixtures in Tests and `node Tests/browser_diagnostics_test.js`. `RENDER_PREVIEWS=1` renders native previews. Diagnostic entry points are compiled separately and excluded from shipped binaries. Optional Developer ID distribution uses `CODESIGN_IDENTITY`, `GUARD_TEAM_ID`, `INSTALLER_IDENTITY` and `NOTARY_PROFILE`.
+
+### Pending health replies
+
+A completed matching response may continue an already OPEN identity while another request remains pending, only if the previous identity and risk evidence are still valid and the exact route, service and filter pass revalidation. A late response cannot revive expired OPEN. Conflicting proof, expired risk, a changed path or damaged rules seal independently of pending requests. The dashboard shows the private build number beside the beta version.
+
+The worker retains at most 60 root-only health-round rows for troubleshooting. Each row contains start/end times, starting/ending phases, the provider category, region provenance, the response timestamp, any seal reason, and the HTTP/transport-exit/body-received category for each provider. No address, response body, node credential or API key is recorded in these rows. A received body alone is not an accepted exit or risk verdict.

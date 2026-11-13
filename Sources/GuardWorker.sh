@@ -522,14 +522,23 @@ tunnel_response() {
     request_timeout=$1
     shift
     http_status=
+    response_received_at=0
+    transport_exit=0
     probe_file=$(/usr/bin/mktemp "$directory/probe.XXXXXX") || return 1
-    if ! http_status=$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/var/empty \
+    if http_status=$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/var/empty \
       /usr/bin/curl -q -4 --noproxy '*' --interface "if!$iface" --proto '=https' --tlsv1.2 \
         --connect-timeout "$request_timeout" --max-time "$request_timeout" --max-filesize 16384 --output "$probe_file" --write-out '%{http_code}' \
         -fsS "$@" 2>/dev/null); then
+      # Retain the actual completed transport time, before body validation and
+      # cleanup. Local parsing work must never make an old response look new.
+      response_received_at=$(/bin/date +%s)
+    else
+      transport_exit=$?
+      printf '%s\n' "$transport_exit" > "$directory/transport-exit"
       discard_probe
       return 1
     fi
+    printf '%s\n' "$transport_exit" > "$directory/transport-exit"
     if [ "$http_status" != 200 ]; then discard_probe; return 1; fi
     probe_size=$(/usr/bin/stat -f '%z' "$probe_file") || { discard_probe; return 1; }
     if [ "$probe_size" -gt 16384 ]; then discard_probe; return 1; fi
@@ -567,53 +576,7 @@ cleanup_health_round() {
   if [ -n "$health_round" ]; then /bin/rm -rf -- "$health_round"; health_round=; fi
 }
 
-sample_exit() {
-  probe_used=
-  probe_observed_at=0
-  probe_region_source=unavailable
-  health_round=$(/usr/bin/mktemp -d "$directory/health.XXXXXX") || return 1
-  /bin/mkdir -m 0700 "$health_round/primary" "$health_round/backup" "$health_round/independent" || { cleanup_health_round; return 1; }
-  # Give legitimate TLS setup the whole round budget without adding two
-  # serial deadlines. Each child has separate output and transport metadata.
-  (
-    trap - EXIT HUP INT TERM
-    directory="$health_round/primary"
-    if tunnel_response 4 "https://$probe_primary/cdn-cgi/trace" > "$health_round/primary.trace"; then
-      /bin/date +%s > "$health_round/primary.stamp"
-    fi
-  ) &
-  health_primary_pid=$!
-  (
-    trap - EXIT HUP INT TERM
-    directory="$health_round/backup"
-    if tunnel_response 4 "https://$probe_backup/cdn-cgi/trace" > "$health_round/backup.trace"; then
-      /bin/date +%s > "$health_round/backup.stamp"
-    fi
-  ) &
-  health_backup_pid=$!
-  (
-    trap - EXIT HUP INT TERM
-    directory="$health_round/independent"
-    if [ "${phase:-}" = OPEN ] && risk_fresh "$(/bin/date +%s)"; then
-      context=$(independent_health_address) || exit 0
-      address=${context%|*}; budget=${context##*|}
-      route_via_tunnel "$address" || exit 0
-      if tunnel_response "$budget" --resolve "api.ipify.org:443:$address" \
-          'https://api.ipify.org' > "$health_round/independent.trace"; then
-        /bin/date +%s > "$health_round/independent.stamp"
-      fi
-    elif [ "${phase:-}" = LOCKED ] && [ ! -f "$health_cache_file" ]; then
-      # Prime DNS only; IP-only continuity cannot authorize initial admission.
-      independent_health_address >/dev/null || true
-    fi
-  ) &
-  health_independent_pid=$!
-  wait "$health_primary_pid" || true
-  wait "$health_backup_pid" || true
-  wait "$health_independent_pid" || true
-  health_primary_pid=
-  health_backup_pid=
-  health_independent_pid=
+select_health_reply() {
   chosen_observed=
   chosen_region=
   chosen_probe=
@@ -661,7 +624,6 @@ sample_exit() {
       fi
     fi
   fi
-  cleanup_health_round
   if [ -n "$chosen_observed" ]; then
     observed=$chosen_observed
     observed_region=$chosen_region
@@ -672,6 +634,184 @@ sample_exit() {
   fi
   observed=-
   return 1
+}
+
+seal_pending_health() {
+  health_sealed=1
+  health_seal_reason=$2
+  if load_phase "$1"; then
+    phase=$1
+    reset_stability
+    publish LOCKED "-" "$2"
+  else
+    # A failed write cannot leave this round eligible to retain OPEN. The
+    # ordinary repair loop and independent native fence handle the fault.
+    enforce_seal || true
+    phase=SEALED
+    reset_stability
+    drift=1
+    publish DRIFT "-" pf-load
+  fi
+}
+
+guard_pending_health() {
+  [ "${phase:-}" = OPEN ] && [ "$health_sealed" = 0 ] || return 0
+  health_now=$(/bin/date +%s)
+  # A negative completed reply wins immediately, even if another child has
+  # already supplied matching evidence during this round.
+  if [ "$health_has_reply" = 1 ] &&
+     { [ "$observed" != "$expected" ] ||
+       { [ -z "$risk_key" ] && [ "$observed_region" != "$risk_region" ]; }; }; then
+    seal_pending_health LOCKED exit-mismatch
+    return 0
+  fi
+  if ! identity_fresh "$health_now" || ! risk_fresh "$health_now"; then
+    seal_pending_health LOCKED evidence-expired
+    return 0
+  fi
+  # Inspect changed evidence immediately and the packet/path boundary at most
+  # once per wall-clock second while requests remain pending.
+  if [ "$health_changed" = 0 ] && [ "$health_checked_at" = "$health_now" ]; then return 0; fi
+  health_checked_at=$health_now
+  if ! rules_intact; then
+    health_sealed=1
+    health_seal_reason=pf-changed
+    enforce_seal || true
+    phase=SEALED
+    reset_stability
+    drift=1
+    publish DRIFT "-" pf-changed
+    return 0
+  fi
+  if [ "$(underlay_snapshot || true)" != "$bound_path" ] ||
+     [ "$(vpn_connection "$vpn_service" || true)" != "Connected $iface" ] ||
+     [ -n "$(probe_route_reason)" ]; then
+    seal_pending_health SEALED route-changed
+    return 0
+  fi
+  health_now=$(/bin/date +%s)
+  if ! identity_fresh "$health_now" || ! risk_fresh "$health_now"; then
+    seal_pending_health LOCKED evidence-expired
+    return 0
+  fi
+  if [ "$health_has_reply" = 1 ] && [ "$probe_observed_at" -gt "$last_verified" ] &&
+     [ "$probe_observed_at" -le "$health_now" ]; then
+    # Adopt only a validated response processed while the previous lease and
+    # exact context still hold. A late reply can never revive expired OPEN.
+    last_verified=$probe_observed_at
+    health_reason=probe-ok
+    case "$probe_used" in "$probe_backup") health_reason=probe-backup;; independent) health_reason=probe-independent;; esac
+    publish OPEN "$observed" "$health_reason"
+  else
+    publish "$last_state" "$last_observed" "$last_reason"
+  fi
+}
+
+record_health_round() {
+  # Bounded root-only transport categories, never addresses, bodies or secrets.
+  health_ended_at=$(/bin/date +%s)
+  case "$probe_used" in
+    "$probe_primary") health_selected=primary;;
+    "$probe_backup") health_selected=backup;;
+    independent) health_selected=independent;;
+    *) health_selected=none;;
+  esac
+  {
+    if [ -f "$directory/health-events" ]; then /usr/bin/tail -n 59 "$directory/health-events"; fi
+    printf '%s|%s|%s|%s|%s|%s|%s|%s' "$health_started_at" "$health_ended_at" "$health_started_phase" "${phase:-none}" "$health_selected" "$probe_region_source" "$probe_observed_at" "$health_seal_reason"
+    for health_label in primary backup independent; do
+      health_http=$(/bin/cat "$health_round/$health_label/transport-status" 2>/dev/null) || health_http=none
+      health_exit=$(/bin/cat "$health_round/$health_label/transport-exit" 2>/dev/null) || health_exit=none
+      case "$health_http" in [0-9][0-9][0-9]) :;; *) health_http=none;; esac
+      case "$health_exit" in ''|*[!0-9]*) health_exit=none;; esac
+      health_valid=0; if [ -f "$health_round/$health_label.stamp" ]; then health_valid=1; fi
+      printf '|%s|%s|%s' "$health_http" "$health_exit" "$health_valid"
+    done
+    printf '\n'
+  } > "$directory/health-events.tmp" && /bin/mv -f "$directory/health-events.tmp" "$directory/health-events"
+}
+
+publish_health_stamp() {
+  printf '%s\n' "$response_received_at" > "$health_round/$1.stamp.tmp" &&
+    /bin/mv -f "$health_round/$1.stamp.tmp" "$health_round/$1.stamp"
+}
+
+sample_exit() {
+  probe_used=
+  probe_observed_at=0
+  probe_region_source=unavailable
+  health_started_at=$(/bin/date +%s)
+  health_started_phase=${phase:-none}
+  health_sealed=0
+  health_seal_reason=none
+  health_checked_at=0
+  health_seen_mask=
+  health_has_reply=0
+  health_round=$(/usr/bin/mktemp -d "$directory/health.XXXXXX") || return 1
+  /bin/mkdir -m 0700 "$health_round/primary" "$health_round/backup" "$health_round/independent" || { cleanup_health_round; return 1; }
+  # Concurrent requests keep their original four-second transport budgets.
+  (
+    trap - EXIT HUP INT TERM
+    directory="$health_round/primary"
+    if tunnel_response 4 "https://$probe_primary/cdn-cgi/trace" > "$health_round/primary.trace"; then
+      publish_health_stamp primary
+    fi
+  ) &
+  health_primary_pid=$!
+  (
+    trap - EXIT HUP INT TERM
+    directory="$health_round/backup"
+    if tunnel_response 4 "https://$probe_backup/cdn-cgi/trace" > "$health_round/backup.trace"; then
+      publish_health_stamp backup
+    fi
+  ) &
+  health_backup_pid=$!
+  (
+    trap - EXIT HUP INT TERM
+    directory="$health_round/independent"
+    if [ "${phase:-}" = OPEN ] && risk_fresh "$(/bin/date +%s)"; then
+      context=$(independent_health_address) || exit 0
+      address=${context%|*}; budget=${context##*|}
+      route_via_tunnel "$address" || exit 0
+      if tunnel_response "$budget" --resolve "api.ipify.org:443:$address" \
+          'https://api.ipify.org' > "$health_round/independent.trace"; then
+        publish_health_stamp independent
+      fi
+    elif [ "${phase:-}" = LOCKED ] && [ ! -f "$health_cache_file" ]; then
+      independent_health_address >/dev/null || true
+    fi
+  ) &
+  health_independent_pid=$!
+  while kill -0 "$health_primary_pid" 2>/dev/null ||
+        kill -0 "$health_backup_pid" 2>/dev/null ||
+        kill -0 "$health_independent_pid" 2>/dev/null; do
+    health_mask=
+    for health_label in primary backup independent; do
+      if [ -s "$health_round/$health_label.stamp" ]; then health_mask="${health_mask}${health_label}"; fi
+    done
+    health_changed=0
+    if [ "$health_mask" != "$health_seen_mask" ]; then
+      health_seen_mask=$health_mask
+      health_changed=1
+      health_has_reply=0
+      if select_health_reply; then health_has_reply=1; fi
+    fi
+    guard_pending_health
+    /bin/sleep .2
+  done
+  wait "$health_primary_pid" || true
+  wait "$health_backup_pid" || true
+  wait "$health_independent_pid" || true
+  health_primary_pid=
+  health_backup_pid=
+  health_independent_pid=
+  health_has_reply=0
+  if select_health_reply; then health_has_reply=1; fi
+  health_changed=1
+  guard_pending_health
+  record_health_round || true
+  cleanup_health_round
+  [ "$health_has_reply" = 1 ]
 }
 
 valid_risk_key() {
@@ -1426,6 +1566,7 @@ PLIST
       if [ -z "$route_reason" ] && /sbin/ifconfig "$iface" >/dev/null 2>&1 && sample_exit; then
         probe_ok=1
       fi
+      if [ "$drift" = 1 ]; then continue; fi
       if [ -z "$route_reason" ]; then route_reason=$(probe_route_reason); fi
       last_probe=$(/bin/date +%s)
       if [ "$mode" = trial ] && [ "$last_probe" -ge "$expires" ]; then

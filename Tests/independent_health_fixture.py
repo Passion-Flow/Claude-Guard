@@ -41,6 +41,14 @@ iface=utun1; peer=192.0.2.7; expected=192.0.2.42; risk_region=US
 session=fixture; vpn_service=service; endpoint_key=endpoint; bound_path=path
 risk_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path|$risk_region"
 phase=OPEN; risk_checked_at=$(( $(/bin/date +%s) - 100 ))
+last_verified=$(/bin/date +%s)
+evidence_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
+rules_intact() {{ return 0; }}
+underlay_snapshot() {{ printf path; }}
+vpn_connection() {{ printf 'Connected utun1'; }}
+probe_route_reason() {{ return 0; }}
+load_phase() {{ printf '%s' "$1" > '{root}/phase'; }}
+publish() {{ return 0; }}
 '''
     def run(primary=None, backup=None, independent=None, extra=''):
         (root / 'scenario.json').write_text(json.dumps({

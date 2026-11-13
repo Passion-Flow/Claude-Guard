@@ -520,18 +520,23 @@ def instrument_worker(original):
     script = script.replace('block drop quick all label', 'block drop log (user) quick all label')
     # Instrument only the disposable curl call. No response body, endpoint,
     # account identifier or credential is included in timing evidence.
-    pattern = r"if ! http_status=\$\((.*?)\); then\n      discard_probe\n      return 1\n    fi"
+    pattern = r"if http_status=\$\((/usr/bin/env -i .*?)\); then"
     def timed_request(match):
         command = match.group(1).replace("'%{http_code}'", "'%{http_code}|%{time_connect}|%{time_appconnect}|%{time_starttransfer}|%{time_total}|%{local_port}'")
         return ("request_started=$(/usr/bin/python3 -I -c 'import time; print(time.time())')\n"
             "    if http_status=$(" + command + "); then request_result=0; else request_result=$?; fi\n"
+            "    request_completed_at=$(/bin/date +%s)\n"
             "    request_ended=$(/usr/bin/python3 -I -c 'import time; print(time.time())')\n"
             "    printf '%s|%s|%s|%s|%s\\n' \"$request_timeout\" \"$request_started\" \"$request_ended\" \"$request_result\" \"$http_status\" >> \"$directory/curl-timings\"\n"
             "    http_status=${http_status%%|*}\n"
-            "    if [ \"$request_result\" -ne 0 ]; then discard_probe; return 1; fi")
+            "    if (exit \"$request_result\"); then")
     script, instrumented = re.subn(pattern, timed_request, script, count=1, flags=re.S)
     if instrumented != 1:
         raise RuntimeError('timing-instrumentation-mismatch')
+    stamp = 'response_received_at=$(/bin/date +%s)'
+    if script.count(stamp) != 1:
+        raise RuntimeError('response-timestamp-instrumentation-mismatch')
+    script = script.replace(stamp, 'response_received_at=$request_completed_at', 1)
     # Keep enough non-secret progress to distinguish identity changes,
     # scheduling gaps and rule repair from a stalled stability counter.
     script = script.replace('publish() {', '''publish() {
