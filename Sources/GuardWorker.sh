@@ -482,6 +482,11 @@ probe_route_reason() {
 }
 
 discard_probe() {
+  # Retain only a bounded HTTP category for transport retry decisions. Never
+  # retain a destination, response body or credential in this diagnostic.
+  case "${http_status:-}" in
+    [0-9][0-9][0-9]) printf '%s\n' "$http_status" > "$directory/transport-status";;
+  esac
   if [ -n "$probe_file" ]; then
     /bin/rm -f -- "$probe_file" "$probe_file.clean"
     probe_file=
@@ -491,10 +496,11 @@ discard_probe() {
 tunnel_response() {
     request_timeout=$1
     shift
+    http_status=
     probe_file=$(/usr/bin/mktemp "$directory/probe.XXXXXX") || return 1
     if ! http_status=$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/var/empty \
       /usr/bin/curl -q -4 --noproxy '*' --interface "if!$iface" --proto '=https' --tlsv1.2 \
-        --connect-timeout 1.5 --max-time "$request_timeout" --max-filesize 16384 --output "$probe_file" --write-out '%{http_code}' \
+        --connect-timeout "$request_timeout" --max-time "$request_timeout" --max-filesize 16384 --output "$probe_file" --write-out '%{http_code}' \
         -fsS "$@" 2>/dev/null); then
       discard_probe
       return 1
@@ -626,9 +632,22 @@ EOF
   else
     request=$(printf 'url = "https://%s/v3/%s?ver=24-June-2026&tag=0"\n' "$risk_host" "$observed")
   fi
-  if body=$(printf '%s\n' "$request" | tunnel_response 4 --resolve "$risk_host:443:$risk_address" --config -); then
-    response=$body
-  fi
+  # A transient connection failure must not make the first anonymous attempt
+  # the sole chance for an entire hour. At most three connections share this
+  # one persisted hourly budget. Retry only without an HTTP response, only
+  # while ordinary traffic is already LOCKED. An HTTP error (including quota
+  # responses), malformed body or negative verdict never triggers this retry.
+  for risk_connection in 1 2 3; do
+    /bin/rm -f "$directory/transport-status"
+    if [ "$phase" = LOCKED ]; then publish LOCKED "-" risk-review; fi
+    if body=$(printf '%s\n' "$request" | tunnel_response 4 --resolve "$risk_host:443:$risk_address" --config -); then
+      response=$body
+      break
+    fi
+    risk_http=$(/bin/cat "$directory/transport-status" 2>/dev/null || printf '000')
+    [ "$phase" = LOCKED ] && [ "$risk_http" = 000 ] && [ "$risk_connection" -lt 3 ] || break
+    /bin/sleep 1
+  done
   if [ "$phase" = LOCKED ]; then
     risk_api_ip=
     load_phase LOCKED || return 3

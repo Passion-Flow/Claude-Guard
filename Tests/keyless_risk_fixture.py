@@ -31,6 +31,7 @@ observed=192.0.2.42
 observed_region=US
 risk_region=US
 phase=LOCKED
+publish() {{ return 0; }}
 load_phase() {{ return 0; }}
 resolve_risk_api() {{ printf 93.184.216.34; }}
 tunnel_response() {{ printf called >> '{root}/calls'; cat '{root}/response'; }}
@@ -68,6 +69,27 @@ if review_exit_risk; then printf '0|%s' "$risk_admission_at"; else printf '%s' "
     assert run(issue=True, override=no_dns) == '2|risk-dns-unavailable'
     unavailable = context.replace("tunnel_response() { printf called >> '" + str(root) + "/calls'; cat '" + str(root) + "/response'; }", 'tunnel_response() { return 1; }')
     assert run(issue=True, override=unavailable) == '2|risk-provider-unavailable'
+    # Connection-only retries remain inside the same persisted hourly slot.
+    # A quota response is terminal, and OPEN renewal never extends the lease
+    # with a multi-request retry loop.
+    for mode, expected_calls, success in [('transient', 2, True), ('quota', 1, False), ('open', 1, False)]:
+        cache.unlink(missing_ok=True)
+        (root / 'runtime/risk-last-attempt').write_text(str(int(time.time()) - 3601))
+        (root / 'response').write_text(json.dumps(response()))
+        (root / 'retry-calls').write_text('')
+        retry = context.replace("tunnel_response() { printf called >> '" + str(root) + "/calls'; cat '" + str(root) + "/response'; }", f'''tunnel_response() {{
+          printf x >> '{root}/retry-calls'
+          count=$(/usr/bin/wc -c < '{root}/retry-calls' | /usr/bin/tr -d ' ')
+          if [ '{mode}' = transient ] && [ "$count" -ge 2 ]; then /bin/cat '{root}/response'; return 0; fi
+          printf '%s' {'429' if mode == 'quota' else '000'} > "$directory/transport-status"
+          return 1
+        }}''')
+        if mode == 'open': retry = retry.replace('phase=LOCKED', 'phase=OPEN')
+        outcome = run(issue=True, override=retry)
+        assert outcome.startswith('0|') if success else outcome == '2|risk-provider-unavailable'
+        assert len((root / 'retry-calls').read_text()) == expected_calls
+        assert (root / 'runtime/risk-last-attempt').exists()
+        assert run(issue=True, override=retry) == ('0|' + outcome.split('|')[1] + '|risk-unavailable' if success else '2|risk-rate-limited')
     for confidence in [0, 25, 89]:
         for flag in [False, True]:
             cache.unlink(missing_ok=True)
@@ -75,4 +97,30 @@ if review_exit_risk; then printf '0|%s' "$risk_admission_at"; else printf '%s' "
             (root / 'response').write_text(json.dumps(response(flag=flag, confidence=confidence)))
             outcome = run()
             assert outcome == '1' if flag else outcome.startswith('0|')
-    print('PASS: keyless actual-worker admission, exact-address cache, original evidence age, rejected/missing facts, restart-persistent quota spacing and positive-detection confidence semantics')
+    # Exercise the real curl wrapper. A TLS handshake can fit inside a risk
+    # request's four-second budget while exceeding the health-specific budget.
+    # The fake transport checks deadlines without sleeping or using a network.
+    curl = root / 'curl'
+    curl.write_text('''#!/usr/bin/python3
+from pathlib import Path
+import sys
+args = sys.argv[1:]
+connect = float(args[args.index('--connect-timeout') + 1])
+total = float(args[args.index('--max-time') + 1])
+if min(connect, total) < 3:
+    raise SystemExit(28)
+Path(args[args.index('--output') + 1]).write_text('bounded-response')
+print('200', end='')
+''')
+    curl.chmod(0o700)
+    transport = source.replace('/usr/bin/curl', str(curl))
+    def actual_transport(seconds):
+        return subprocess.run(['/bin/sh', '-c', transport +
+            f"\ndirectory='{root}/runtime'\niface=utun1\ntunnel_response {seconds} https://example.invalid\n"],
+            capture_output=True, text=True)
+    within = actual_transport(4)
+    assert within.returncode == 0 and within.stdout == 'bounded-response'
+    expired = actual_transport(2)
+    assert expired.returncode != 0 and not expired.stdout
+    assert not list((root / 'runtime').glob('probe.*'))
+    print('PASS: keyless actual-worker admission, cache age, denied/missing facts, persistent quota spacing, confidence semantics and bounded TLS connect budget')

@@ -349,6 +349,8 @@ iface=utun6; peer=192.0.2.42; protocol=tcp; port=443; peer_ifaces=en0
 phase=LOCKED; observed=192.0.2.42; risk_region=US
 risk_key=FixtureRiskKey0123456789
 risk_evaluator=''' + str(evaluator) + '''
+# This function-only fixture has no running worker/status publication context.
+publish() { return 0; }
 if review_exit_risk; then printf 0; else printf '%s' "$?"; fi
 '''
     for decision in (0, 1, 2):
