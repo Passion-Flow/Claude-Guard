@@ -58,7 +58,7 @@ elif args[-1:] == ['-sr'] and args[1].startswith('com.apple/00000'):
 elif args == ['-a', 'com.apple', '-s', 'Anchors']:
     if (root / 'earlier-anchor').exists(): print('com.apple/00000.before-guard')
 elif args == ['-v', '-s', 'Interfaces']:
-    pass
+    if (root / 'skip-loopback').exists(): print('lo0 (skip)')
 else:
     sys.exit(3)
 """)
@@ -340,6 +340,9 @@ if load_phase LOCKED; then printf VERIFIED; else printf REJECTED; fi
     (root / 'earlier-anchor').touch()
     preflight_check = definitions + "\npreflight\n"
     assert subprocess.run(['/bin/sh', '-c', preflight_check], capture_output=True).returncode == 0
+    (root / 'skip-loopback').touch()
+    assert subprocess.run(['/bin/sh', '-c', preflight_check], capture_output=True).returncode != 0
+    (root / 'skip-loopback').unlink()
     (root / 'earlier-rules').write_text('pass quick all\n')
     assert subprocess.run(['/bin/sh', '-c', preflight_check], capture_output=True).returncode != 0
     (root / 'earlier-rules').unlink()
@@ -434,7 +437,7 @@ build_rules "$1"
     )
     try:
         expect("LOCKED", reason="settling")
-        assert status()[12] == "ipv4-tunnel-v8"
+        assert status()[12] == "ipv4-tunnel-v9"
         first = int(status()[2])
         time.sleep(4)
         assert status()[1] == "LOCKED"
@@ -763,7 +766,7 @@ build_rules "$1"
 
     # Native startup seals before any shell marker exists. Exact native
     # ownership permits first-start adoption; foreign rules remain rejected.
-    seal = 'pass quick on lo0 all no state label "CG_LOOP"\nblock drop quick all label "CG_BLOCK"\n'
+    seal = 'block drop quick all label "CG_BLOCK"\n'
     assert not (runtime / 'active').exists()
     (root / 'rules').write_text(seal)
     (root / 'native-last-rules').write_text(seal)

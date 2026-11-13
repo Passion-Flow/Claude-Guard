@@ -530,9 +530,12 @@ final class GuardianCore {
         response.controlRevision = intent.effectiveControlRevision
         response.profileFingerprint = intent.approved ? intent.profileFingerprint : nil
         // This is bootstrap context, not an OPEN authorization. It permits the
-        // same pinned service to start fresh root-only checks while apps stay sealed.
-        if intent.armed || intent.maintenance, let service = intent.serviceID,
-           UUID(uuidString: service) != nil, var route = intent.route {
+        // same node to start fresh root-only checks while apps stay sealed. An
+        // unapproved migration can precede service pinning; its root-owned route
+        // is still usable for discovery, but cannot resume or authorize OPEN.
+        if intent.armed || intent.maintenance, var route = intent.route,
+           intent.serviceID.flatMap({ UUID(uuidString: $0) }) != nil ||
+            (intent.maintenance && !intent.approved && intent.bootstrapHost == route.peer) {
             if let fields = statusFields(), matches(fields, intent: intent),
                fields[1] == "LOCKED", fields[6] == "exit-mismatch", DetectedEndpoint.validIPv4(fields[5]) {
                 route.expected = fields[5]

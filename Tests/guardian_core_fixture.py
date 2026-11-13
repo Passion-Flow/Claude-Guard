@@ -16,7 +16,8 @@ import tempfile
 import time
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-assert sys.argv[1:] in ([], ['--clock'], ['--clock-baseline'], ['--clock-heartbeat-baseline'], ['--restart'], ['--restart-baseline'], ['--restart-stale'], ['--restart-stale-baseline'])
+assert sys.argv[1:] in ([], ['--migration'], ['--clock'], ['--clock-baseline'], ['--clock-heartbeat-baseline'], ['--restart'], ['--restart-baseline'], ['--restart-stale'], ['--restart-stale-baseline'])
+MIGRATION_FIXTURE = sys.argv[1:] == ['--migration']
 CLOCK_FIXTURE = sys.argv[1:] in (['--clock'], ['--clock-baseline'], ['--clock-heartbeat-baseline'])
 RESTART_FIXTURE = sys.argv[1:] in (['--restart'], ['--restart-baseline'], ['--restart-stale'], ['--restart-stale-baseline'])
 
@@ -72,7 +73,7 @@ directory=FIXTURE_DIRECTORY
 publish() {
   if [ -f "$directory/../pause-test-heartbeat" ]; then return; fi
   stamp=$(/bin/date +%s)
-  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|1|11111111-1111-1111-1111-111111111111|%s:%s/%s|ipv4-tunnel-v8|%s\n' "$session" "$phase" "$stamp" "$iface" "$expected" "$expected" "$reason" "$deadline" "$mode" "$peer" "$port" "$transport" "$stamp" > "$directory/status"
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|1|11111111-1111-1111-1111-111111111111|%s:%s/%s|ipv4-tunnel-v9|%s\n' "$session" "$phase" "$stamp" "$iface" "$expected" "$expected" "$reason" "$deadline" "$mode" "$peer" "$port" "$transport" "$stamp" > "$directory/status"
 }
 if [ "$1" = stop ]; then
   if [ -d "$directory/active" ]; then
@@ -184,7 +185,10 @@ struct GuardianTrust {
                 str(root / "GuardianRecovery.swift"),
                 str(REPOSITORY / "Daemon/GuardianPacketFence.swift"),
                 str(REPOSITORY / "Daemon/GuardianPowerObserver.swift"),
-                str(REPOSITORY / "Tests" / ("guardian_restart_fixture.swift" if RESTART_FIXTURE else ("guardian_clock_fixture.swift" if CLOCK_FIXTURE else "guardian_core_fixture.swift")))]
+                str(REPOSITORY / "Tests" / ("guardian_migration_fixture.swift" if MIGRATION_FIXTURE else ("guardian_restart_fixture.swift" if RESTART_FIXTURE else ("guardian_clock_fixture.swift" if CLOCK_FIXTURE else "guardian_core_fixture.swift"))))]
+    if MIGRATION_FIXTURE:
+        sources += [str(REPOSITORY / "Sources/ShadowrocketProfile.swift"),
+                    str(REPOSITORY / "Sources/AutomaticDiscovery.swift")]
     executable = root / "CoreFixture"
     try:
         subprocess.run(["swiftc", "-swift-version", "5", "-O", "-D", "GUARD_DIAGNOSTICS", "-parse-as-library", *sources, "-o", str(executable)], check=True)

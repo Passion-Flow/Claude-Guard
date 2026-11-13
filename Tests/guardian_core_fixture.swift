@@ -221,16 +221,22 @@ import Foundation
         precondition(core.prepareUpgrade() == 0)
         try store.locked {
             let encoded = try JSONEncoder().encode(store.read())
-            var old = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
-            old["schemaVersion"] = 1
-            old["policy"] = "ipv4-tunnel-v7"
-            old.removeValue(forKey: "bootstrapHost")
-            try JSONSerialization.data(withJSONObject: old).write(to: URL(fileURLWithPath: store.directory + "/intent.json"))
-            try store.migrateLegacy(owner: getuid())
+            for (schema, policy) in [(1, "ipv4-tunnel-v7"), (2, "ipv4-tunnel-v8")] {
+                var old = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+                old["schemaVersion"] = schema
+                old["policy"] = policy
+                if schema == 1 { old.removeValue(forKey: "bootstrapHost") }
+                try JSONSerialization.data(withJSONObject: old).write(to: URL(fileURLWithPath: store.directory + "/intent.json"))
+                try store.migrateLegacy(owner: getuid())
+                let migrated = try store.read()
+                precondition(!migrated.armed && !migrated.approved && migrated.maintenance && migrated.automaticEnabled == false)
+                precondition(migrated.serviceID == pinnedService)
+            }
         }
         until { phase("LOCKED") }
         let migrated = request(GuardianRequest(.state), core: core)
         precondition(!migrated.canResume && !migrated.automaticEnabled)
+        precondition(migrated.revalidationRoute == route && migrated.profileFingerprint == nil)
         precondition(request(GuardianRequest(.resume, session: UUID().uuidString), core: core).code == 82)
         precondition(request(automatic, core: core, freshIntent: true).code == 0)
         until { phase("OPEN") }

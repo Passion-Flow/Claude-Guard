@@ -77,6 +77,7 @@ enum Launch {
                       !rules.text.contains("CG_PEER_IN"),
                       rules.text.contains("inet proto " + protocolName + " from any to 192.0.2.42 port = 443"),
                       (phase == "OPEN") == rules.text.contains("CG_TUNNEL"),
+                      (phase == "OPEN") == rules.text.contains("CG_LOOP"),
                       (phase == "LOCKED") == rules.text.contains("CG_PROBE_OUT") else { return false }
                 if phase == "OPEN" {
                     guard rules.text.contains("pass quick on utun6 inet all no state label \"CG_TUNNEL\""),

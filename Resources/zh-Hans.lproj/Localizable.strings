@@ -191,7 +191,8 @@
 "Public host address exposed" = "浏览器暴露了公网主机地址";
 "Browser exit sample matched" = "本次浏览器出口样本符合预期";
 "Browser test notice" = "请在实际使用的浏览器中运行。每次检查都会新建 WebRTC 连接，通过当前网络策略访问 Cloudflare STUN。该服务可以看到检测出口。无需摄像头或麦克风权限。本地检测页面五分钟后失效。";
-"Browser test scope" = "这里只记录一次浏览器观测。局域网和 mDNS 地址与公网暴露分别处理，中继地址需要单独核对路径。空结果或受限结果仍为未验证。故障期间是否持续拦截需要抓包验收。";
+"Browser test scope" = "这里只记录一次浏览器观测。局域网和 mDNS 地址与公网暴露分别处理，中继地址需要单独核对路径。防护锁定时本地 TCP/IP 同样被阻断，本地检测页面可能需等放行后才能继续。空结果或受限结果仍为未验证。故障期间是否持续拦截需要抓包验收。";
+"Local TCP/IP connections pause until protection opens." = "防护放行前，本地 TCP/IP 连接也会暂停。";
 "The local browser test could not start." = "本地浏览器检查未能启动。";
 "Open browser check" = "打开浏览器检查";
 "Close browser check" = "关闭浏览器检查";

@@ -20,7 +20,7 @@ stability_seconds=15
 stability_samples=6
 stability_tick=3
 stability_max_gap=8
-policy_id=ipv4-tunnel-v8
+policy_id=ipv4-tunnel-v9
 session=
 mode=
 owned=0
@@ -165,7 +165,11 @@ build_rules() {
   rule_phase=$1
   extra=
   [ "$protocol" != tcp ] || extra='flags any'
-  printf 'pass quick on lo0 all no state label "CG_LOOP"\n'
+  # Loopback can be a network-capable HTTP/SOCKS relay. Gate its ingress
+  # together with ordinary tunnel traffic, including existing local sockets.
+  if [ "$rule_phase" = OPEN ]; then
+    printf 'pass quick on lo0 all no state label "CG_LOOP"\n'
+  fi
   if [ -n "$admin_source" ]; then
     # Optional remote console. Replies follow this state and nothing else is opened.
     printf 'pass in quick inet proto tcp from %s to any port = 22 flags S/SA keep state (if-bound) label "CG_ADMIN"\n' "$admin_source"
@@ -234,7 +238,7 @@ preflight() {
   done
   interfaces=$("$pf" -v -s Interfaces 2>/dev/null) || return 1
   # On supported layouts the verbose output marks skipped interfaces with "(skip)".
-  printf '%s\n' "$interfaces" | /usr/bin/awk '/skip/ && $1!="lo0" { bad=1 } END { exit bad }'
+  printf '%s\n' "$interfaces" | /usr/bin/awk '/skip/ { bad=1 } END { exit bad }'
 }
 
 publish() {

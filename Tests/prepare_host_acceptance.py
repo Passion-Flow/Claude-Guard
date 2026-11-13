@@ -41,7 +41,12 @@ def configuration():
     _, row, scalar = helper['selected'](helper['read'](helper['ARCHIVE']), selection)
     port = str(scalar(row['port']))
     assert str(int(port)) == port and 1 <= int(port) <= 65535
-    host_hash = hashlib.sha256(str(scalar(row['host'])).encode()).hexdigest()
+    selected_host = str(scalar(row['host']))
+    host_hash = hashlib.sha256(selected_host.encode()).hexdigest()
+    try:
+        numeric_host = str(ipaddress.IPv4Address(selected_host))
+    except ipaddress.AddressValueError:
+        numeric_host = None
     services = call(['/usr/sbin/scutil', '--nc', 'list']).stdout.decode()
     services = [line for line in services.splitlines() if '(Connected)' in line and '(com.liguangming.Shadowrocket)' in line]
     assert len(services) == 1, 'Exactly one connected Shadowrocket service is required'
@@ -70,7 +75,7 @@ def configuration():
             def finish():
                 if protocol == 'TCP' and remote and established:
                     address, remote_port = remote
-                    if remote_port == port and ipaddress.ip_address(address).is_global:
+                    if remote_port == port and ipaddress.ip_address(address).is_global and (numeric_host is None or address == numeric_host):
                         endpoints.add(address)
             for line in result.stdout.decode().splitlines() + ['f']:
                 if line.startswith(('f', 'p')):

@@ -28,6 +28,8 @@ jobs:
         run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --restart-stale
       - name: Check automatic discovery without host changes
         run: /usr/bin/python3 -I Tests/automatic_discovery_fixture.py
+      - name: Check sealed migration through actual discovery
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --migration
       - name: Check installer lifecycle without installation
         run: /usr/bin/python3 -I Tests/installer_fixture.py
       - name: Check browser diagnostics without network access

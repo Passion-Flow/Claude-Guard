@@ -48,7 +48,7 @@ final class GuardianPacketFence {
     private let signalLock = NSLock()
     private var commandDeadline: TimeInterval = 0
     private let anchor: String
-    private let emergency = "pass quick on lo0 all no state label \"CG_LOOP\"\nblock drop quick all label \"CG_BLOCK\"\n"
+    private let emergency = "block drop quick all label \"CG_BLOCK\"\n"
 
     convenience init() throws {
         guard geteuid() == 0 else { throw Failure.permission }
@@ -399,6 +399,7 @@ final class GuardianPacketFence {
             guard value.monitoring, !value.powerBlocked, value.session == session, try revocation() == nil,
                   phase != .open || value.openAllowed else { throw Failure.revoked }
             guard (phase == .open) == rules.contains("label \"CG_TUNNEL\"") else { throw Failure.corrupt }
+            guard phase == .open || !rules.contains("label \"CG_LOOP\"") else { throw Failure.corrupt }
             do {
                 let result = try install(rules)
                 value.lastRules = result

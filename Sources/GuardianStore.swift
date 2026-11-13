@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 enum GuardianSchema {
-    static let policy = "ipv4-tunnel-v8"
+    static let policy = "ipv4-tunnel-v9"
     static let stateDirectory = GuardianTrust.directory + "/state"
 }
 
@@ -141,19 +141,23 @@ final class GuardianStore {
             let approved: Bool
             let maintenance: Bool
             let route: GuardianRoute?
+            let serviceID: String?
             let automaticEnabled: Bool?
         }
         guard let bytes = try readBytes() else { return }
         if let current = try? JSONDecoder().decode(GuardianIntent.self, from: bytes), current.valid { return }
         let legacy = try JSONDecoder().decode(Legacy.self, from: bytes)
-        guard legacy.schemaVersion == 1, ["ipv4-tunnel-v6", "ipv4-tunnel-v7"].contains(legacy.policy) else { throw Failure.corrupt }
+        guard (legacy.schemaVersion == 1 && ["ipv4-tunnel-v6", "ipv4-tunnel-v7"].contains(legacy.policy)) ||
+              (legacy.schemaVersion == 2 && legacy.policy == "ipv4-tunnel-v8") else { throw Failure.corrupt }
         var next = GuardianIntent()
         next.advanceControlRevision()
         next.ownerUID = legacy.ownerUID == 0 ? owner : legacy.ownerUID
         next.automaticEnabled = legacy.automaticEnabled ?? true
         if legacy.armed || legacy.approved || legacy.maintenance {
-            guard let route = legacy.route, route.valid, let boot = Self.bootID() else { throw Failure.corrupt }
+            guard let route = legacy.route, route.valid, let boot = Self.bootID(),
+                  legacy.serviceID == nil || UUID(uuidString: legacy.serviceID!) != nil else { throw Failure.corrupt }
             next.route = route
+            next.serviceID = legacy.serviceID
             next.bootstrapHost = route.peer // Sealed bootstrap metadata, never approval.
             next.maintenance = true
             next.persistent = true

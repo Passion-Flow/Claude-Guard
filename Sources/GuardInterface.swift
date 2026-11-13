@@ -188,6 +188,10 @@ struct GuardWindow: View {
                     }
                     Text(controller.stateExplanation[language])
                         .font(.callout).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    if controller.rulesConfirmed && !controller.isOpen {
+                        Text(tr("Local TCP/IP connections pause until protection opens."))
+                            .font(.caption).foregroundStyle(palette.secondary)
+                    }
                     HStack {
                         metric(tr("Approved exit"), endpointDisplay(controller.status?.expected ?? controller.configuration.exit))
                         metric(tr("Observed exit"), endpointDisplay(controller.status?.observed))

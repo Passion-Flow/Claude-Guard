@@ -191,7 +191,8 @@
 "Public host address exposed" = "Public host address exposed";
 "Browser exit sample matched" = "Browser exit sample matched";
 "Browser test notice" = "Run this test in the browser you actually use. Each run opens a new WebRTC connection and contacts Cloudflare STUN through the active network policy. The STUN service can see the test exit. Camera and microphone access is not required. This local test page expires after five minutes.";
-"Browser test scope" = "This records one browser observation. Private or mDNS addresses are separate from public exposure. Relay addresses need separate path verification. Empty or limited results remain unverified. Packet capture is required to verify enforcement across failures.";
+"Browser test scope" = "This records one browser observation. Private or mDNS addresses are separate from public exposure. Relay addresses need separate path verification. Local TCP/IP is blocked while protection is locked, so the local test may be unavailable until release. Empty or limited results remain unverified. Packet capture is required to verify enforcement across failures.";
+"Local TCP/IP connections pause until protection opens." = "Local TCP/IP connections pause until protection opens.";
 "The local browser test could not start." = "The local browser test could not start.";
 "Open browser check" = "Open browser check";
 "Close browser check" = "Close browser check";

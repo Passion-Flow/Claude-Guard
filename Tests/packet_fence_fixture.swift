@@ -47,6 +47,7 @@ let guardSigningTeam = ""
         let filtered = root.appendingPathComponent("rules")
         check(!(try String(contentsOf: filtered, encoding: .utf8)).contains("CG_TUNNEL"))
         let nativeSeal = try String(contentsOf: filtered, encoding: .utf8)
+        check(!nativeSeal.contains("CG_LOOP"))
         rejects { _ = try other.load(rules, phase: .open, session: session) }
         rejects { try other.confirmOwnership(nativeSeal, session: session) }
         rejects { try gate.begin(UUID().uuidString, openAllowed: true) }
@@ -65,6 +66,9 @@ let guardSigningTeam = ""
         check(!(try String(contentsOf: filtered, encoding: .utf8)).contains("CG_TUNNEL"))
         rejects { _ = try gate.load(rules, phase: .open, session: fresh) }
         do { _ = try gate.load(rules, phase: .locked, session: fresh); preconditionFailure("OPEN rules accepted with a closed phase") }
+        catch GuardianPacketFence.Failure.corrupt {}
+        let oldClosed = "pass quick on lo0 all no state label \"CG_LOOP\"\nblock drop quick all label \"CG_BLOCK\"\n"
+        do { _ = try gate.load(oldClosed, phase: .locked, session: fresh); preconditionFailure("Legacy loopback permission accepted while locked") }
         catch GuardianPacketFence.Failure.corrupt {}
         try gate.begin(fresh, openAllowed: true)
 
