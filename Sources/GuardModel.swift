@@ -321,7 +321,6 @@ final class GuardController: ObservableObject {
     }
 
     var stateExplanation: GuardText {
-        if let notice { return notice }
         if !serviceAvailable && !preview { return GuardText("Open the private installer to install the system guardian. macOS asks for administrator authorization.") }
         if stale { return GuardText("The rule state cannot be confirmed. Use Restore network on this Mac.") }
         if legacyPolicy {
@@ -459,6 +458,13 @@ final class GuardController: ObservableObject {
         controller.notice = GuardText("Report exported.")
         controller.clearRecoveredAutomaticIssue()
         guard controller.automaticIssue == nil && controller.notice == GuardText("Report exported.") else { return false }
+        // An unrelated action message must not conceal current policy evidence
+        // or a lost guardian. The view displays that message separately.
+        guard let status = controller.status,
+              controller.stateExplanation == GuardCopy.reason(status.reason) else { return false }
+        controller.stale = true
+        guard controller.stateExplanation == GuardText("The rule state cannot be confirmed. Use Restore network on this Mac.") else { return false }
+        controller.stale = false
         controller.automaticGeneration = 0
         controller.automaticEnabled = true
         controller.active = false

@@ -188,6 +188,16 @@ struct GuardWindow: View {
                     }
                     Text(controller.stateExplanation[language])
                         .font(.callout).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let notice = controller.notice {
+                        Label {
+                            Text(notice[language]).fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "info.circle")
+                        }
+                        .font(.callout).foregroundStyle(palette.secondary)
+                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(palette.highlight, in: RoundedRectangle(cornerRadius: 9))
+                    }
                     if controller.rulesConfirmed && !controller.isOpen {
                         Text(tr("Local TCP/IP connections pause until protection opens."))
                             .font(.caption).foregroundStyle(palette.secondary)
