@@ -170,6 +170,7 @@ enum Tools {
 final class GuardController: ObservableObject {
     let browserDiagnostics = BrowserDiagnostics()
     let serviceDiagnostics = ServiceDiagnostics()
+    private let shadowrocketStartup = ShadowrocketStartup()
     @Published var configuration: GuardConfiguration
     @Published private(set) var check: LocalCheck?
     @Published private(set) var status: Snapshot?
@@ -515,6 +516,17 @@ final class GuardController: ObservableObject {
                 }.value
                 defer { automaticChecking = false }
                 guard generation == automaticGeneration, !paused, (force || automaticEnabled) else { return }
+                if let profile = observation.1 ?? observation.0?.profile {
+                    await shadowrocketStartup.prepare(profile: profile, route: revalidation,
+                        fingerprint: fingerprint, active: currentActive, persistent: persistent,
+                        automatic: automaticEnabled, paused: paused, open: isOpen) { [weak self] in
+                            guard let self else { return false }
+                            return generation == self.automaticGeneration && self.active && self.persistent &&
+                                self.automaticEnabled && !self.paused && !self.isOpen &&
+                                self.automaticFingerprint == profile.fingerprint
+                        }
+                    guard generation == automaticGeneration, !paused, (force || automaticEnabled) else { return }
+                }
                 if let profile = observation.1, let route = revalidation,
                    route.peer == profile.host, route.port == String(profile.port), route.transport == profile.transport {
                     // Refresh display metadata after an app restart without

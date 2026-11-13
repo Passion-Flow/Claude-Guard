@@ -53,7 +53,7 @@ enum Launch {
 
     #if GUARD_DIAGNOSTICS
     @MainActor private static func selfTest() -> Bool {
-        guard GuardController.automaticIssueLifecycleSelfTest() else { return false }
+        guard GuardController.automaticIssueLifecycleSelfTest(), ShadowrocketStartup.selfTest() else { return false }
         guard AutomaticSetupIssue(ShadowrocketProfile.Failure.unavailable) == .profileAccess,
               AutomaticSetupIssue(ShadowrocketProfile.Failure.bootstrap) == .numericBootstrap,
               AutomaticSetupIssue(ShadowrocketProfile.Failure.routing) == .routingMode,
