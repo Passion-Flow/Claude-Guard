@@ -1,0 +1,138 @@
+# Claude Guard engineering roadmap
+
+Updated 2026-11-13. The baseline is the existing `hardening/fail-closed-guardian` working tree, including its uncommitted changes. Milestones below describe acceptance conditions. A simulated result is recorded separately from a signed build or physical-device result.
+
+## Product requirements
+
+- Native macOS application with existing browser, desktop, terminal and IDE workflows.
+- One supervised policy owner, restrictive physical-interface rules, approved tunnel identity, narrow node bootstrap and network maintenance exceptions.
+- Positive exit identity and fresh risk evidence before release. Connection recovery must complete a fresh stability window.
+- English source and engineering documentation. English and Simplified Chinese through localization resources, with system, light and dark appearance and custom selection controls.
+- Local diagnostics and redacted reports. Optional external diagnostics disclose their destination and run only on explicit user action.
+- Double-click private installation and local offline recovery. End users do not install a language runtime or enter shell commands. Private installation uses administrator authorization and root-owned code-hash trust metadata. A paid developer certificate is optional for this deployment path.
+
+## Milestones
+
+| Milestone | Scope | Acceptance gate | Status |
+| --- | --- | --- | --- |
+| P0 enforcement and privilege | Review PF lifecycle, early boot, rule removal, skipped interfaces, concurrent control and guardian death. Implement authenticated XPC with private-install code-hash pinning. | Packet-level evidence for each supported failure mode, root-owned installation trust, caller validation and independent offline recovery. Explicitly record any pre-enforcement window. | In progress. Private installation does not require a paid certificate. Network Extension deployment is a separate architecture option with its own requirements. |
+| P1 health evidence | Strict HTTPS result parsing, scoped routing, bounded evidence lifetime, context invalidation, stable recovery and safe rule readback. | Offline counterexamples cannot reopen traffic. A valid control still opens after six checks spanning at least 15 seconds. Recovery, trial and persistence tests pass. | Implemented and offline verified. Installed-host VPN and Wi-Fi recovery passed with actual Core/worker enforcement and synthetic risk admission; the remaining matrix is open. |
+| P2 risk admission | Authorized provider integration with typed responses, approved region, residential policy, strict risk flags, renewal and credential protection. | Missing, expired, rejected or unavailable required evidence keeps traffic locked. Keys and raw responses are excluded from process arguments, public logs and exports. | Implemented. Actual tunnel-bound provider lookup and native parser accepted a deployment-address response. This schema/path check is distinct from complete host admission at that deployment. Negative and malformed controls passed offline. |
+| P3 browser and destination diagnostics | A bundled, short-lived loopback test page for the actual browser, fresh WebRTC connections per phase, destination path checks and optional external-site links. | Private and mDNS candidates, public host disclosure, reflexive exits, relay addresses and unavailable evidence have distinct outcomes. Diagnostics cannot authorize release. | Implemented. One actual browser passed protected/blocked/recovered ICE and fresh main-document checks. Other browser variants and anonymous service-path acceptance remain open. |
+| P4 supervision and coexistence | Approved service recovery, Wi-Fi and Ethernet transitions, sleep and wake, unexpected process exit, existing connections and host Tailscale. | Repeated fault injection shows restrictive recovery without retry storms or a direct-connect fallback. Verify private development access separately. | Actual VPN/Wi-Fi faults, long and short sleep, worker TERM/KILL/STOP, Core replacement, rule removal/repair and userspace Tailscale SSH passed. A ten-minute supervised observation passed. Kernel-mode Tailscale, Ethernet and cold boot retain separate gates. |
+| P5 interface and reports | Evidence source, scope, age and verification state in the dashboard, menu bar and redacted report. Complete localization and theme coverage. | Optional checks cannot create a whole-device safety claim. Expired or context-mismatched results lose their previous approval display. | Implemented. Native bilingual light/dark checks and custom-picker arrow/Return/Escape interactions passed. Redacted exports passed separately. Actual menu-panel interaction remains unverified. |
+| P6 private installation and acceptance | Rebuild reviewed source, ad-hoc sign and pin each component, build a private installer, publish checksums and prepare a GUI acceptance prompt. Developer ID signing and notarization remain optional distribution profiles. | Matched application/helper trust metadata, safe clean installation and upgrade, independent recovery, documented results and all mandatory enforcement gates resolved. | In progress. Installation authorization is expected. Gatekeeper may require an explicit local allow action. |
+
+## Verification matrix
+
+| Area | Required scenarios |
+| --- | --- |
+| Egress | DNS over UDP and TCP, encrypted DNS, IPv4 and IPv6, UDP, QUIC, multicast and WebRTC, existing and new connections. |
+| Identity | Unexpected exit, unrelated tunnel, same service with a new tunnel, changed node or configuration, more-specific route, stale or ambiguous observations. |
+| Network | Local link loss and restoration, Ethernet failover, new interfaces, sleep and wake, forward and backward clock changes, captive connectivity. |
+| Control | Closed dashboard, stopped and force-killed worker, lost supervision, disabled PF, removed or foreign rules, failed rule readback, concurrent activate and restore. |
+| Recovery | Trial timeout, explicit continuation, local restoration while offline, interrupted installation, restart and upgrade with active protection. |
+| Browser | Protected, disconnected and recovered phases in each supported actual browser, each with a new closed PeerConnection. Permission-limited and empty results remain unverified. |
+| Resource use | Bounded timeouts and backoff, no overlapping checks, limited logs and connections, no browser or third-party checks on a permanent polling loop. |
+| Privacy | No node credentials, risk keys, candidate addresses or packet contents in exported reports. Separate browser diagnostics from authoritative policy state. |
+
+## Current increment
+
+- Implemented strict HTTP 200 and single-address trace validation, explicit tunnel interface binding and independent system-route checks for both health destinations.
+- Replaced unrelated-host reachability approval with a 12-second exit-observation lifetime bound to the session, service, interface, endpoint, approved exit and visible underlay path. Heartbeats do not extend that lifetime. One bounded empty round and the full recovery dwell remain supported.
+- Implemented complete canonical rule readback comparison with a restrictive fallback after an inconsistent write. A known label alone cannot establish the loaded phase.
+- Added a five-minute loopback browser diagnostic with request bounds, per-session URLs, same-origin result submission and context invalidation. Tests create fresh WebRTC connections, close them and submit counts without candidate addresses. Starting it requires continuous protection. Closing a diagnostic does not change the traffic policy.
+- Added explicit external diagnostic buttons and redacted report output. Existing installation and README changes were preserved.
+- Passed offline probe, phase-readback, candidate classification and browser connection-lifecycle controls. The guardian simulation passed route mismatch, evidence expiry, state recovery, trial and startup scenarios. Both CPU targets compiled and the native self-test passed. English and Simplified Chinese resources and light/dark native previews were checked.
+- Physical packet evidence now includes matching kernel drops for fresh IPv4/IPv6 TCP/UDP flows, with positive physical-path controls, actual Core supervision and native packet-fence writes. Real VPN and Wi-Fi faults recovered after fresh stability checks. These engineering tests substitute risk admission only; they are not live reputation acceptance.
+- Actual browser ICE and fresh main-document requests passed protected, disconnected and recovered phases in one browser. The disconnected fresh main-document request failed; recovered requests returned an uncached response. Browser evidence used a separate worker fixture with synthetic readiness/risk, so it is not evidence of a physical power transition.
+- Installed private services and native UI were exercised. A separately signed client with the application's identifier but an unpinned code hash was rejected by all three actual installed XPC listeners. Installed launchd restart and independent recovery from a stopped primary holding the control lock passed. Live-provider host admission, pre-enforcement windows and the remaining fault/coexistence matrix remain open. A development build is not a release acceptance result.
+
+The existing trial intentionally restores connectivity on timeout. Browser and external-site checks are limited to continuous protection to avoid extending an active diagnostic across that automatic restoration. Update timeout semantics and recovery tests together when adopting a different trial policy.
+
+## Release decisions
+
+Private-install integration is implemented. A root-owned package installs one visible application, a supervised main helper and an independent recovery helper. Recovery opens within the application or through the matching offline package. Both CPU architectures are compiled. Private trust pins each component's identifiers and code hashes; non-secret XPC authentication precedes sensitive requests. Approval and trial deadlines are root-owned, worker inputs use stdin, and every supervised restart creates a fresh session. Continuing a legacy trial enables persistent protection automatically.
+
+The independent privilege-boundary review identified a shared-lock recovery obstruction. A stopped lock holder reproduced the failure. The fix adds bounded local/file locking and control-process waits; authenticated independent recovery stops the primary job before taking that lock. The same stopped-holder trigger now restores without releasing the holder manually. Unauthorized recovery does not stop it. Corrupt or missing approval state revokes a running worker into a sealed state. Offline controls cover commit/session matching, pause/resume, fresh restart sessions, sealed upgrade, cross-instance disarm, trial expiry, failed installer preparation, bootout/bootstrap failures and recovery/uninstall fallback.
+
+The native anonymous service-path diagnostic is explicit, cookie-free, credential-free, redirect-rejecting and response-bounded. Its observations expire after five minutes, cancel on protection changes and cannot authorize release. Browser observations retain separate scope. One actual browser ICE cycle passed; other browser variants and actual anonymous service responses retain separate acceptance gates.
+
+The current product is a private acceptance build. The supplied installation image and acceptance prompt do not constitute a completed packet-level safety certification. The checklist records engineering verification. The user authorized installation and fault testing on the development host; target deployment uses automatic startup checks. Do not infer unobserved tests from this authorization.
+
+PF is a shared administrative facility. A user-space restart job, an expiry timer or an additional PF anchor does not independently establish protection before the guardian starts or while PF is disabled. These conditions remain release gates, even if functional simulation passes.
+
+The finite destination list in claude-lockdown is reference data for diagnostics, not the boundary for all application traffic. Reimplement applicable lifecycle ideas within Guard's single owner. Resolve upstream licensing before copying source.
+
+Claude-Cage's expiring, context-bound authorization and revocation mechanisms inform P1 and P4. Its isolated guest and guest Tailscale architecture do not establish host-wide macOS enforcement.
+
+External website scores have provider-specific meanings. Optional sites and browser self-tests are evidence with a stated scope, not substitutes for required enforcement and risk admission.
+
+## References
+
+- [Apple packet-filter boundary](https://developer.apple.com/documentation/technotes/tn3165-packet-filter-is-not-api)
+- [Apple Network Extension deployment](https://developer.apple.com/documentation/technotes/tn3134-network-extension-provider-deployment)
+- [WebRTC IP handling](https://www.rfc-editor.org/rfc/rfc8828.html)
+- [Reviewed claude-lockdown source](https://github.com/xaiwind/claude-lockdown/blob/fc3bf32439df1c72901735d54fd14edba5a5ef95/claude-lockdown.sh)
+- [Reviewed Claude-Cage gate](https://github.com/Lee-xeo/Claude-Cage/blob/53b7c13a9ab599d00d26dfed5a6585233d069d7d/internal/cage/gate.go)
+
+## Automatic setup increment (0.4)
+
+One visible application now hosts the recovery mode. A login agent launches automatic discovery while the independent root services enforce persisted intent. Initial discovery reads allowlisted numeric-node metadata, corroborates signed-provider sockets and checks the exit through the connected tunnel before authenticated activation. Hostname nodes are not admitted. The default declared keyless policy uses Proxycheck v3 and trace-country evidence, with exact-address binding, strict typed parsing, original-age cache reuse and persistent one-hour query spacing. Unsupported profiles and unavailable evidence remain explicit blockers. The prior manual/IPQS/trial workflow is no longer the default UI. Development-host live enforcement results must be recorded separately from offline fixtures and target automatic checks.
+
+## Power and packet-writer boundary
+
+The native guardian registers IOKit power notifications before starting OPEN-capable supervision. A pending revocation closes admission before waiting for an in-flight PF writer. All shell phase loads and clears go through the signed, root-only native boundary, which serializes writers across processes and rejects old sessions. A complete write has one bounded command budget; individually bounded subprocesses cannot accumulate an unbounded writer transaction. The PF child retains the writer lock if its native parent dies.
+
+Sleep acknowledgment follows the sealing attempt. An error is reported as a failure rather than interpreted as a successful barrier; withholding acknowledgment is not enforcement. Completed wake requires a fresh worker/session and the existing stability/risk admission. Early wake, duplicate notifications, daemon restart during pending sleep, explicit restore, pause and upgrade have separate controls. Native ownership plus exact PF readback permits safe adoption of an emergency seal without accepting foreign rules. Offline fixtures include delayed PF commands, parent death, queued writers, short sleep and restoration interleavings. Actual installed sleep/wake acceptance remains a separate gate. PF errors, root interference and pre-enforcement windows retain the architecture limits described above.
+
+## Bootstrap boundary correction
+
+Live testing exposed that a hostname-based shared provider can reconnect with a different address or need DNS while the physical filter is sealed. Automatic admission now requires a dedicated numeric IPv4 node and Proxy mode, with localized blockers before activation. No physical DNS exception or uncorroborated socket fallback is introduced. A connected-tunnel DNS lookup is not represented as evidence of cold-bootstrap support. Physical tap observations are separated from application connection outcomes and matching kernel PF drop records in the development harness.
+
+Policy v8 binds approved intent to an explicit numeric bootstrap host. Earlier policy approvals migrate to a sealed, unapproved state and cannot resume silently. A runtime profile rejection revokes approval through authenticated control while retaining restrictive rules; repeated invalidation is idempotent. Fresh valid numeric setup is required before unattended release returns.
+
+## Durable control and sealed revalidation increment
+
+Wire version 2 carries a root-owned control revision. Restore, installation, upgrade and operator transitions rotate it. Delayed activation, invalidation, trial or resume requests cannot override a later recovery or pause. A deferred folder-access callback preserves its initiating generation and user intent; granting folder access does not become a new Enable action. Poll replies from older controller generations are discarded. Inactive-state invalidation checks freshness before acknowledging a no-op.
+
+Revalidation of the exact same numeric node may use bootstrap context returned by the authenticated guardian for its already pinned service. This context never authorizes OPEN. It avoids requiring ordinary-user HTTPS while the whole-device filter deliberately blocks that traffic. The guardian retains the pinned service only for the same endpoint and reruns root identity, stability and risk checks. A fresh, context-matched root exit-mismatch observation can initiate revalidation with the changed exit; stale or foreign observations cannot. A different node under the sealed filter requires local restoration and a new initial discovery.
+
+The actual-core fixture reproduces delayed control requests across independent recovery and a new core instance, along with pause, migration and invalidation controls. The discovery fixture executes the real discovery implementation with deterministic OS observations and fails on ordinary networking during sealed revalidation. Native universal builds and these offline results remain distinct from installed-host and browser acceptance.
+
+## Clock-independent watchdog and recovery
+
+Launch grace, worker-heartbeat observation and restart backoff now use process uptime. Re-reading one heartbeat cannot renew its lifetime after a wall-clock rewind. Deterministic tests reproduce a large rewind and repeated small rewinds against the actual Core with a paused fixture heartbeat; both revoke the old session. A continuously publishing control survives clock changes. The host clock is never altered by these tests.
+
+A non-sleep fallback seal may retry metadata readiness only while the registered power observer remains awake. Pending sleep and a newer revocation still require their proper power transition. Automatic recovery creates a fresh session. Offline controls verify both the recovery and the pending-sleep denial case.
+
+## Installed-host evidence ledger
+
+Engineering run identifiers refer to private, redacted retained evidence outside the repository. No local profile or deployment address is included here.
+
+| Evidence | Observed result | Remaining qualification |
+| --- | --- | --- |
+| Build 16 | Universal build, native self-tests, code-hash trust checks, package inspection and all offline CI checks passed; installation succeeded. | No release-completeness claim. |
+| Run 23 | Actual browser ICE and uncached main-document requests passed protected/blocked/recovered phases. | Separate worker-only fixture with synthetic readiness and risk; one browser. |
+| Run 24 | Actual Core/IOKit registration, kernel TCP/UDP drops and VPN recovery passed. Native restore returned nonzero; independent cleanup removed the test anchor. | Failure retained. Do not erase it because a later repetition passes. |
+| Run 25 | The same Core/worker fault path and native restore passed; restore completed in approximately seven seconds. | Investigate any recurrence of the earlier restoration failure. |
+| Run 26 | Actual Wi-Fi loss blocked release; an independent local plan restored Wi-Fi; fresh admission and native restoration passed. | No Ethernet-failover inference. |
+| Run 27 | Physical IPv6 positive control was inconclusive, so no sleep fault was injected. | An inconclusive prerequisite is not a passing power test. |
+| Run 29 | Actual sleep/wake, fresh session and re-admission passed. | The test's awake-service verification ran too early and reported false. The service was independently verified running; the observer was corrected and the test-owned alarm was removed. |
+| Run 30 | Protected SSH and blocking of fresh/existing SSH passed; the first recovered connection failed. | Failure retained. Recovery observations now record typed failures and bounded retries without weakening the filter or host-key checks. |
+| Run 31 | Fresh console-user SSH worked while protected, old and new SSH failed during VPN loss, and a fresh SSH connected after recovery. | Existing userspace Tailscale configuration only; no kernel-tunnel or general peer-access claim. |
+| Run 32 | Actual short sleep lasted approximately 7.3 seconds. A new session admitted traffic approximately 30 seconds after completed wake. Awake-service restoration and exact test-alarm cleanup passed. | Actual Core/Power/Fence/worker with synthetic risk; no pre-enforcement or root-interference guarantee. |
+| Build 18 / run 33 | Native replacement fencing passed offline; the first host start rejected its own preinstalled restrictive seal. | Failure retained. Build 19 adds exact native ownership/readback adoption for the initial worker; foreign-rule controls remain rejecting. |
+| Run 34 | Worker/process and repair checks passed, except the repair dwell observer reused an earlier OPEN status. | Test observer corrected to measure actual kernel tunnel-rule reappearance after sealing. This run is not counted as a passing dwell measurement. |
+| Build 19 / run 35 | Worker TERM, KILL and frozen-heartbeat failures sealed, then recovered through fresh sessions. Core replacement, actual rule removal/repair, VPN recovery and native restoration passed. Rule repair completed in approximately 1.8 seconds; ordinary tunnel traffic returned approximately 33.4 seconds after repair began. | Actual Core/Power/Fence/worker, isolated test paths and synthetic risk. A separate later restrictive anchor guarded the deliberate rule-removal test. Driver replacement is not a launchd or reboot test. |
+| Run 36 | Ten-minute actual Core/worker/PF observation passed: 601 seconds, 285 OPEN samples, no sampled phase drop. IPv4/IPv6 TCP/UDP direct-path controls hit kernel drop rules. Native restoration returned zero in approximately 4.9 seconds. | Synthetic risk and bounded samples; no long-term availability or production resource benchmark claim. |
+| Installed control plane | Actual launchd replaced a killed primary. Independent installed recovery succeeded while the primary was stopped holding its control lock; disarmed intent remained durable. All three listeners rejected the unpinned client. | Initially disarmed production intent. Active enforcement was tested separately; no cold-boot inference. |
+| Installed packages | Matching offline recovery and uninstall packages ran successfully. Owned application, helper directory and jobs were removed; clean reinstallation and code-hash validation passed. | Initially disarmed production intent. Offline fixtures cover interrupted and active maintenance paths; this is not a live protected-upgrade test. |
+
+Three-minute mixed idle/fault resource samples were recorded with the dashboard visible. These are sampled process estimates, not a production OPEN benchmark. The separate ten-minute continuity check does not establish long-term availability. Kernel-mode Tailscale, Ethernet, cold boot, complete live-provider host admission and startup-window characterization remain explicit gates. Computer Use could inspect the installed dashboard, but SystemUIServer timed out; actual menu-panel interaction remains unverified.
+
+Provider confidence is the confidence of a positive detection, not clean-line confidence. All required positive flags remain rejecting regardless of that number. Missing or malformed confidence remains unavailable; a valid low number does not independently invalidate otherwise complete negative detection evidence. See the [provider definition](https://proxycheck.io/api/).
+
+## Failed replacement boundary
+
+Every worker launch now forces a native restrictive seal before rotating the session. A failure to start the child or deliver its input revokes OPEN again. The decision does not trust cached phase metadata: a failed write/readback sequence can leave real tunnel rules different from the cached state. Two focused reproductions cover synchronized and stale metadata, repeated launch failures, first-retry sealing, continuous denial, successful replacement and explicit restoration. The initial shell worker adopts a preinstalled seal only after the native owner confirms its session and exact rule readback.

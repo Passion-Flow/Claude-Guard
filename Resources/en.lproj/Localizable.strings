@@ -1,5 +1,4 @@
 "  Exit " = "  Exit ";
-"%1$@ is not installed." = "%1$@ is not installed.";
 "60-second trial" = "60-second trial";
 "A local network detection check was recorded." = "A local network detection check was recorded.";
 "A probe timed out. The original tunnel is still connected and direct traffic remains blocked while the check retries." = "A probe timed out. The original tunnel is still connected and direct traffic remains blocked while the check retries.";
@@ -9,7 +8,7 @@
 "Administrator authorization did not complete." = "Administrator authorization did not complete.";
 "Administrator authorization was not granted." = "Administrator authorization was not granted.";
 "Allow supported tunnel traffic only" = "Allow supported tunnel traffic only";
-"An earlier policy is active. Close Claude, restore networking locally, then enable the new policy." = "An earlier policy is active. Close Claude, restore networking locally, then enable the new policy.";
+"An earlier policy is active. Close your apps, restore networking locally, then enable the new policy." = "An earlier policy is active. Close your apps, restore networking locally, then enable the new policy.";
 "An event was recorded by an earlier version. Switch to Chinese to read the original note." = "An event was recorded by an earlier version. Switch to Chinese to read the original note.";
 "App traffic" = "App traffic";
 "Appearance" = "Appearance";
@@ -26,15 +25,12 @@
 "Claude Guard Report.txt" = "Claude Guard Report.txt";
 "Claude Guard quick panel" = "Claude Guard quick panel";
 "Claude Guard session report" = "Claude Guard session report";
-"Claude desktop" = "Claude desktop";
-"Claude web" = "Claude web";
-"Close Claude before restoring. If the VPN is still disconnected, apps may connect directly." = "Close Claude before restoring. If the VPN is still disconnected, apps may connect directly.";
-"Close Claude first. Removing protection can restore direct Internet access if the VPN is disconnected." = "Close Claude first. Removing protection can restore direct Internet access if the VPN is disconnected.";
+"Close your apps before restoring. If the VPN is still disconnected, apps may connect directly." = "Close your apps before restoring. If the VPN is still disconnected, apps may connect directly.";
+"Close your apps first. Removing protection can restore direct Internet access if the VPN is disconnected." = "Close your apps first. Removing protection can restore direct Internet access if the VPN is disconnected.";
 "Connect the node in Shadowrocket, then detect and select its tunnel." = "Connect the node in Shadowrocket, then detect and select its tunnel.";
 "Continue and authorize" = "Continue and authorize";
 "Continue protection" = "Continue protection";
 "Copy a supported single-node link from 3x-ui or detect an active connection." = "Copy a supported single-node link from 3x-ui or detect an active connection.";
-"Could not open %1$@." = "Could not open %1$@.";
 "Could not write the report. Choose another location." = "Could not write the report. Choose another location.";
 "Dark" = "Dark";
 "Default interface %1$@. Tunnel interfaces found: %2$@." = "Default interface %1$@. Tunnel interfaces found: %2$@.";
@@ -82,7 +78,6 @@
 "Not reviewed" = "Not reviewed";
 "Observed exit" = "Observed exit";
 "Open Claude Guard" = "Open Claude Guard";
-"Open while protected" = "Open while protected";
 "Outer transport" = "Outer transport";
 "Overview" = "Overview";
 "Physical interface" = "Physical interface";
@@ -124,7 +119,6 @@
 "Simplified Chinese" = "Simplified Chinese";
 "Six checks passed over at least 15 seconds. Apps may use the tunnel." = "Six checks passed over at least 15 seconds. Apps may use the tunnel.";
 "Six consecutive exit checks span at least 15 seconds on the same tunnel and visible route. Failures or changes restart the window." = "Six consecutive exit checks span at least 15 seconds on the same tunnel and visible route. Failures or changes restart the window.";
-"Start the trial locally. macOS will ask for administrator access and reset existing connections. Blocking remains in effect when the trial expires." = "Start the trial locally. macOS will ask for administrator access and reset existing connections. Blocking remains in effect when the trial expires.";
 "Status " = "Status ";
 "Status updated." = "Status updated.";
 "Stopped" = "Stopped";
@@ -133,7 +127,6 @@
 "System routes could not be read. App traffic remains blocked." = "System routes could not be read. App traffic remains blocked.";
 "System rules changed" = "System rules changed";
 "TLS declared" = "TLS declared";
-"Terminal" = "Terminal";
 "The Claude Guard rules are no longer active." = "The Claude Guard rules are no longer active.";
 "The Claude Guard rules were removed." = "The Claude Guard rules were removed.";
 "The VPN is connected. App traffic stays blocked while the tunnel and approved exit are being verified." = "The VPN is connected. App traffic stays blocked while the tunnel and approved exit are being verified.";
@@ -173,7 +166,6 @@
 "Upload" = "Upload";
 "Use a node link with authenticated encryption and certificate verification enabled." = "Use a node link with authenticated encryption and certificate verification enabled.";
 "Use the Mac administrator password to remove this session’s rules. This tool works offline." = "Use the Mac administrator password to remove this session’s rules. This tool works offline.";
-"VS Code" = "VS Code";
 "Verify the exit before allowing apps to connect." = "Verify the exit before allowing apps to connect.";
 "Verifying tunnel stability" = "Verifying tunnel stability";
 "Waiting for the original Shadowrocket service. App traffic remains blocked." = "Waiting for the original Shadowrocket service. App traffic remains blocked.";
@@ -181,3 +173,142 @@
 "Working" = "Working";
 "macOS could not load or verify the protection rules." = "macOS could not load or verify the protection rules.";
 "macOS was asked to reconnect the original Shadowrocket service. Waiting for validation." = "macOS was asked to reconnect the original Shadowrocket service. Waiting for validation.";
+"Start the trial locally. macOS will ask for administrator access and reset existing connections. If you do not select Continue protection before the trial ends, the rules are removed and direct access returns." = "Start the trial locally. macOS will ask for administrator access and reset existing connections. If you do not select Continue protection before the trial ends, the rules are removed and direct access returns.";
+"Exit checks are unavailable, but the tunnel still reaches the Internet. Direct traffic remains blocked." = "Exit checks are unavailable, but the tunnel still reaches the Internet. Direct traffic remains blocked.";
+"Enable protection at startup" = "Enable protection at startup";
+"After a restart, all traffic stays blocked until this route is verified, with no password prompt. If the VPN cannot connect, use Claude Guard Recovery on this Mac. Restore network removes this setting." = "After a restart, all traffic stays blocked until this route is verified, with no password prompt. If the VPN cannot connect, use Claude Guard Recovery on this Mac. Restore network removes this setting.";
+"Keep after restart" = "Keep after restart";
+"Startup protection on" = "Startup protection on";
+"Startup protection is on. Restore network removes it." = "Startup protection is on. Restore network removes it.";
+"Startup protection could not be enabled. The current rules are still in place." = "Startup protection could not be enabled. The current rules are still in place.";
+"Remote admin IPv4 for SSH (optional)" = "Remote admin IPv4 for SSH (optional)";
+"Enter a valid numeric admin address, or leave it empty." = "Enter a valid numeric admin address, or leave it empty.";
+"Browser network check" = "Browser network check";
+"Run browser check" = "Run browser check";
+"Checking browser…" = "Checking browser…";
+"Browser evidence unavailable" = "Browser evidence unavailable";
+"Browser exit differs" = "Browser exit differs";
+"Public host address exposed" = "Public host address exposed";
+"Browser exit sample matched" = "Browser exit sample matched";
+"Browser test notice" = "Run this test in the browser you actually use. Each run opens a new WebRTC connection and contacts Cloudflare STUN through the active network policy. The STUN service can see the test exit. Camera and microphone access is not required. This local test page expires after five minutes.";
+"Browser test scope" = "This records one browser observation. Private or mDNS addresses are separate from public exposure. Relay addresses need separate path verification. Empty or limited results remain unverified. Packet capture is required to verify enforcement across failures.";
+"The local browser test could not start." = "The local browser test could not start.";
+"Open browser check" = "Open browser check";
+"Close browser check" = "Close browser check";
+"External diagnostic sites use their own scoring methods." = "External diagnostic sites use their own scoring methods. Opening a site reveals the test exit to its operator.";
+"System routing differs from the approved tunnel. App traffic remains blocked." = "System routing differs from the approved tunnel. App traffic remains blocked.";
+"The approved exit observation expired. App traffic remains blocked while validation restarts." = "The approved exit observation expired. App traffic remains blocked while validation restarts.";
+"Enable continuous protection before starting a browser check." = "Enable continuous protection before starting a browser check. Close the test page before restoring direct connectivity.";
+"Select the approved exit region." = "Select the approved exit region.";
+"Install the system guardian" = "Install the system guardian";
+"Protection paused" = "Protection paused";
+"Open the private installer to install the system guardian. macOS asks for administrator authorization." = "Open the private installer to install the system guardian. macOS asks for administrator authorization.";
+"Import a node link again before starting a new trial." = "Import a node link again before starting a new trial.";
+"Enter an authorized risk-service key." = "Enter an authorized risk-service key.";
+"The guardian did not confirm activation." = "The guardian did not confirm activation.";
+"Install the matching private application and system guardian package." = "Install the matching private application and system guardian package.";
+"Restore the earlier version before installing this guardian." = "Restore the earlier version before installing this guardian.";
+"The guardian rejected the route, node declaration or risk key." = "The guardian rejected the route, node declaration or risk key.";
+"The guardian did not confirm this operation. Check status before retrying." = "The guardian did not confirm this operation. Check status before retrying.";
+"Checking fresh exit risk evidence." = "Checking fresh exit risk evidence.";
+"The exit did not meet the strict risk policy. App traffic remains blocked." = "The exit did not meet the strict risk policy. App traffic remains blocked.";
+"Required risk evidence is unavailable. App traffic remains blocked." = "Required risk evidence is unavailable. App traffic remains blocked.";
+"Protection is paused. Ordinary traffic stays blocked. Resume protection or restore networking locally." = "Protection is paused. Ordinary traffic stays blocked. Resume protection or restore networking locally.";
+"Risk check passed" = "Risk check passed";
+"Risk check in progress" = "Risk check in progress";
+"Risk policy denied release" = "Risk policy denied release";
+"Risk evidence unavailable" = "Risk evidence unavailable";
+"Resume protection" = "Resume protection";
+"Pause protection" = "Pause protection";
+"Startup protection follows confirmation." = "Startup protection follows confirmation.";
+"Open offline recovery" = "Open offline recovery";
+"Approved exit region" = "Approved exit region";
+"IPQS service key" = "IPQS service key";
+"The strict policy requires fresh residential risk evidence. The service key is kept in protected local storage." = "The strict policy requires fresh residential risk evidence. The service key is kept in protected local storage.";
+"Uninstall Claude Guard…" = "Uninstall Claude Guard…";
+"Open the matching recovery package from the installation image." = "Open the matching recovery package from the installation image.";
+"Tailscale SSH peer (optional)" = "Tailscale SSH peer (optional)";
+"Managed by system guardian" = "Managed by system guardian";
+"Confirm the trial to enable automatic protection after restart." = "Confirm the trial to enable automatic protection after restart.";
+"Anonymous service exit matched" = "Anonymous service exit matched";
+"Anonymous service exit differs" = "Anonymous service exit differs";
+"Anonymous service evidence unavailable" = "Anonymous service evidence unavailable";
+"Anonymous service path" = "Anonymous service path";
+"Check service path" = "Check service path";
+"Checking…" = "Checking…";
+"Last risk check" = "Last risk check";
+"Search options" = "Search options";
+"No matching options" = "No matching options";
+"Service path scope" = "On explicit request, contacts anonymous trace endpoints on claude.ai and api.anthropic.com without account cookies. Each result is one native HTTPS observation, expires after five minutes and cannot authorize release. A missing or restricted trace remains unverified. This does not prove the path of a signed-in browser or API request.";
+"Risk admission" = "Risk admission";
+"Required provider evidence" = "Required provider evidence";
+"The approved region, residential classification, low score and clear risk flags are required. Missing or expired evidence keeps apps blocked." = "The approved region, residential classification, low score and clear risk flags are required. Missing or expired evidence keeps apps blocked.";
+"Guardian and recovery" = "Guardian and recovery";
+"System supervision" = "System supervision";
+"The system guardian retains approved configuration, repairs damaged rules and starts fresh validation after recovery. Offline restoration remains a separate local action." = "The system guardian retains approved configuration, repairs damaged rules and starts fresh validation after recovery. Offline restoration remains a separate local action.";
+"Restart never reuses a previous exit observation" = "Restart never reuses a previous exit observation";
+"Recovery did not complete. Keep apps closed and open the matching offline recovery package." = "Recovery did not complete. Keep apps closed and open the matching offline recovery package.";
+"Use a single Tailscale IPv4 peer address, or leave it empty." = "Use a single Tailscale IPv4 peer address, or leave it empty.";
+"Only SSH to this private peer is allowed on its tunnel after protection opens. Tailscale transport must use the approved VPN; local direct paths remain blocked." = "Only SSH to this private peer is allowed on its tunnel after protection opens. Tailscale transport must use the approved VPN; local direct paths remain blocked.";
+
+"VMess AEAD profile" = "VMess AEAD profile";
+"Shadowsocks AEAD profile" = "Shadowsocks AEAD profile";
+"Waiting for a supported, connected Shadowrocket profile. No protection is active yet." = "Waiting for a supported, connected Shadowrocket profile. No protection is active yet.";
+"Shadowrocket is checked automatically. Apps are released only after tunnel stability and risk checks pass." = "Shadowrocket is checked automatically. Apps are released only after tunnel stability and risk checks pass.";
+"Enable automatic protection" = "Enable automatic protection";
+"Reading the active Shadowrocket profile…" = "Reading the active Shadowrocket profile…";
+"Automatic detection and protection" = "Automatic detection and protection";
+"Startup monitoring enabled" = "Startup monitoring enabled";
+"Detection, stability checks, risk admission and recovery run automatically." = "Detection, stability checks, risk admission and recovery run automatically.";
+"Only connection and encryption metadata is read. Shadowrocket performs the actual handshake." = "Only connection and encryption metadata is read. Shadowrocket performs the actual handshake.";
+"Automatic setup" = "Automatic setup";
+"Connect Shadowrocket once. The active profile, endpoint, tunnel and exit are detected without manual fields or a personal API key." = "Connect Shadowrocket once. The active profile, endpoint, tunnel and exit are detected without manual fields or a personal API key.";
+"Risk admission requires a residential classification, score at most 10, clear risk flags and the approved region. Unavailable evidence keeps traffic blocked." = "Risk admission requires a residential classification, score at most 10, clear risk flags and the approved region. Unavailable evidence keeps traffic blocked.";
+"Advanced preferences" = "Advanced preferences";
+
+"Policy state · Evidence scope" = "Policy state · Evidence scope";
+"Detection and protection events appear here automatically." = "Detection and protection events appear here automatically.";
+
+"Set Shadowrocket Global Routing to Proxy. Config and Direct modes are not admitted automatically." = "Set Shadowrocket Global Routing to Proxy. Config and Direct modes are not admitted automatically.";
+
+"Use a dedicated node profile with a numeric IPv4 server address. Hostname bootstrap cannot recover with outside DNS blocked." = "Use a dedicated node profile with a numeric IPv4 server address. Hostname bootstrap cannot recover with outside DNS blocked.";
+
+"Allow read access" = "Allow read access";
+"Allow Claude Guard to read connection metadata from this Shadowrocket folder. Passwords and subscription payloads are not decoded." = "Allow Claude Guard to read connection metadata from this Shadowrocket folder. Passwords and subscription payloads are not decoded.";
+
+"Allow read access to the Shadowrocket configuration folder, then detect again." = "Allow read access to the Shadowrocket configuration folder, then detect again.";
+
+"The Shadowrocket configuration format could not be validated. Protection setup is blocked." = "The Shadowrocket configuration format could not be validated. Protection setup is blocked.";
+
+"The selected Shadowrocket profile is ambiguous. Protection setup is blocked." = "The selected Shadowrocket profile is ambiguous. Protection setup is blocked.";
+
+"The selected profile's transport or encryption settings are not supported for automatic protection." = "The selected profile's transport or encryption settings are not supported for automatic protection.";
+
+"The selected profile changed during detection. A fresh check is required." = "The selected profile changed during detection. A fresh check is required.";
+
+"Connect Shadowrocket before automatic protection can be activated." = "Connect Shadowrocket before automatic protection can be activated.";
+
+"The active VPN route could not be confirmed. Protection setup is blocked." = "The active VPN route could not be confirmed. Protection setup is blocked.";
+
+"The tunnel exit check did not return valid evidence. Automatic detection will retry." = "The tunnel exit check did not return valid evidence. Automatic detection will retry.";
+
+"A unique live connection from the verified Shadowrocket provider could not be confirmed." = "A unique live connection from the verified Shadowrocket provider could not be confirmed.";
+
+"The VPN path changed during detection. A fresh check is required." = "The VPN path changed during detection. A fresh check is required.";
+"The selected node differs from the sealed bootstrap. Restore networking locally before approving a different node." = "The selected node differs from the sealed bootstrap. Restore networking locally before approving a different node.";
+
+"Automatic setup could not be completed. Check the protection status before continuing." = "Automatic setup could not be completed. Check the protection status before continuing.";
+
+"The risk provider retry window has not elapsed. Apps stay blocked until fresh evidence is available." = "The risk provider retry window has not elapsed. Apps stay blocked until fresh evidence is available.";
+
+"The risk provider address could not be verified through the tunnel. App traffic remains blocked." = "The risk provider address could not be verified through the tunnel. App traffic remains blocked.";
+
+"The risk provider did not return a verified HTTPS response. App traffic remains blocked." = "The risk provider did not return a verified HTTPS response. App traffic remains blocked.";
+
+"The risk provider evidence could not be validated. App traffic remains blocked." = "The risk provider evidence could not be validated. App traffic remains blocked.";
+
+"Risk check deferred" = "Risk check deferred";
+
+"Guardian settings changed during this operation. Check the current status and try again." = "Guardian settings changed during this operation. Check the current status and try again.";
+
+"Automatic protection is disabled. Enable it to resume detection and enforcement." = "Automatic protection is disabled. Enable it to resume detection and enforcement.";

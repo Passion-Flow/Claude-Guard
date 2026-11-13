@@ -69,8 +69,8 @@ enum GuardAppearance: String, CaseIterable {
 }
 
 enum GuardPolicy {
-    static let id = "ipv4-tunnel-v1"
-    static let version = "0.2.5"
+    static let id = GuardianSchema.policy
+    static let version = "0.4.0"
     static let preferences = UserDefaults(suiteName: "org.claudeguard.appearance") ?? .standard
 }
 
@@ -84,7 +84,18 @@ enum GuardCopy {
         "underlay-offline": GuardText("The local network is unavailable. App traffic stays blocked while Wi-Fi or Ethernet recovers."),
         "vpn-restarting": GuardText("The local network returned, but the tunnel did not recover. Restarting the original VPN service once."),
         "route-unknown": GuardText("System routes could not be read. App traffic remains blocked."),
+        "route-mismatch": GuardText("System routing differs from the approved tunnel. App traffic remains blocked."),
+        "evidence-expired": GuardText("The approved exit observation expired. App traffic remains blocked while validation restarts."),
+        "risk-review": GuardText("Checking fresh exit risk evidence."),
+        "risk-rejected": GuardText("The exit did not meet the strict risk policy. App traffic remains blocked."),
+        "risk-unavailable": GuardText("Required risk evidence is unavailable. App traffic remains blocked."),
+        "risk-rate-limited": GuardText("The risk provider retry window has not elapsed. Apps stay blocked until fresh evidence is available."),
+        "risk-dns-unavailable": GuardText("The risk provider address could not be verified through the tunnel. App traffic remains blocked."),
+        "risk-provider-unavailable": GuardText("The risk provider did not return a verified HTTPS response. App traffic remains blocked."),
+        "risk-invalid-response": GuardText("The risk provider evidence could not be validated. App traffic remains blocked."),
+        "manual-paused": GuardText("Protection is paused. Ordinary traffic stays blocked. Resume protection or restore networking locally."),
         "probe-backup": GuardText("The backup probe verified the approved exit."),
+        "probe-degraded": GuardText("Exit checks are unavailable, but the tunnel still reaches the Internet. Direct traffic remains blocked."),
         "probe-retry": GuardText("A probe timed out. The original tunnel is still connected and direct traffic remains blocked while the check retries."),
         "probe-failed": GuardText("Exit checks failed. App traffic remains blocked."),
         "exit-mismatch": GuardText("The observed exit differs from the approved exit. App traffic remains blocked."),
@@ -98,7 +109,7 @@ enum GuardCopy {
         "tunnel-missing": GuardText("The tunnel disappeared. Restore networking and run detection again."),
         "pf-load": GuardText("macOS could not load or verify the protection rules."),
         "pf-changed": GuardText("The system packet filter changed. Protection coverage cannot be confirmed."),
-        "rollback-failed": GuardText("Recovery did not complete. Try Restore network again or restart this Mac to clear the session rules."),
+        "rollback-failed": GuardText("Recovery did not complete. Keep apps closed and open the matching offline recovery package."),
         "trial-ended": GuardText("The trial ended and the original rules were restored."),
         "stopped": GuardText("The Claude Guard rules were removed."),
     ]

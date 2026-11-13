@@ -9,29 +9,42 @@ struct GuardConfiguration: Codable, Equatable, Sendable {
     var transport = "tcp"
     var expected = ""
     var interface = ""
+    var adminSource: String?
+    var approvedRegion: String?
+    var developmentPeer: String?
 
+    var developmentAddress: String {
+        get { developmentPeer ?? "" }
+        set { developmentPeer = newValue.isEmpty ? nil : newValue }
+    }
+
+    var adminAddress: String {
+        get { adminSource ?? "" }
+        set { adminSource = newValue.isEmpty ? nil : newValue }
+    }
     var exit: String { expected.isEmpty ? peer : expected }
     var endpointKey: String { peer + ":" + port + "/" + transport }
 
-    static func validIPv4(_ value: String) -> Bool {
-        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
-        return parts.count == 4 && parts.allSatisfy {
-            guard let byte = UInt8($0), String(byte) == $0 else { return false }
-            return true
-        }
-    }
+    static func validIPv4(_ value: String) -> Bool { DetectedEndpoint.validIPv4(value) }
 
     static func validInterface(_ value: String) -> Bool {
-        value.range(of: #"^utun[0-9]+$"#, options: .regularExpression) != nil
+        value.range(of: #"^utun[0-9]+\z"#, options: .regularExpression) != nil
     }
 
     var problem: GuardText? {
         if !Self.validIPv4(peer) { return GuardText("Enter a valid numeric node address.") }
         if ["1.1.1.1", "1.0.0.1"].contains(peer) { return GuardText("The node address must be different from both health probes.") }
         if !Self.validIPv4(exit) { return GuardText("Enter a valid numeric exit address.") }
+        if !GuardRiskPolicy.regions.contains(approvedRegion ?? "") { return GuardText("Select the approved exit region.") }
+        if let developmentPeer, !GuardianRoute.validDevelopmentPeer(developmentPeer) {
+            return GuardText("Use a single Tailscale IPv4 peer address, or leave it empty.")
+        }
         if let value = UInt16(port), value > 0, String(value) == port { }
         else { return GuardText("Enter the node port (1–65535).") }
         if !["tcp", "udp"].contains(transport) { return GuardText("Select the node transport.") }
+        if !adminAddress.isEmpty && !Self.validIPv4(adminAddress) {
+            return GuardText("Enter a valid numeric admin address, or leave it empty.")
+        }
         if !Self.validInterface(interface) { return GuardText("Connect the node in Shadowrocket, then detect and select its tunnel.") }
         return nil
     }
@@ -51,10 +64,11 @@ struct Snapshot: Sendable, Equatable {
     let serviceID: String?
     let endpointKey: String?
     let policyID: String?
+    let riskCheckedAt: Date?
 
     init?(_ line: String) {
         let fields = line.trimmingCharacters(in: .newlines).split(separator: "|", omittingEmptySubsequences: false)
-        guard (9...13).contains(fields.count), let stamp = Double(fields[2]), stamp.isFinite,
+        guard (9...14).contains(fields.count), let stamp = Double(fields[2]), stamp.isFinite,
               let until = Double(fields[7]), until.isFinite,
               ["IDLE", "VERIFYING", "LOCKED", "OPEN", "DRIFT", "ERROR"].contains(String(fields[1])) else { return nil }
         session = String(fields[0])
@@ -70,14 +84,10 @@ struct Snapshot: Sendable, Equatable {
         serviceID = fields.count >= 11 && UUID(uuidString: String(fields[10])) != nil ? String(fields[10]) : nil
         endpointKey = fields.count >= 12 && !fields[11].isEmpty ? String(fields[11]) : nil
         policyID = fields.count >= 13 && !fields[12].isEmpty ? String(fields[12]) : nil
+        riskCheckedAt = fields.count >= 14 ? Double(fields[13]).flatMap { $0 > 0 && $0.isFinite ? Date(timeIntervalSince1970: $0) : nil } : nil
     }
 }
 
-struct ApprovedRoute: Codable, Equatable {
-    let endpointKey: String
-    let expected: String
-    let serviceID: String
-}
 
 struct GuardEvent: Codable, Identifiable {
     var id = UUID()
@@ -113,7 +123,7 @@ struct LocalCheck: Sendable {
         let interfaces = Tools.call("/sbin/ifconfig", ["-l"]).text
             .split(whereSeparator: \.isWhitespace).map(String.init).filter(GuardConfiguration.validInterface)
         let vpn = Tools.call("/usr/sbin/scutil", ["--nc", "list"]).text
-            .split(whereSeparator: \.isNewline).contains { $0.contains("(Connected)") && $0.localizedCaseInsensitiveContains("Shadowrocket") }
+            .split(whereSeparator: \.isNewline).contains { $0.contains("(Connected)") && $0.hasSuffix("[VPN:com.liguangming.Shadowrocket]") }
         return Self(system: ProcessInfo.processInfo.operatingSystemVersionString, defaultInterface: routeInterface,
                     tunnels: interfaces, vpnConnected: vpn, pfPresent: FileManager.default.isExecutableFile(atPath: "/sbin/pfctl"))
     }
@@ -153,46 +163,53 @@ enum Tools {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    static func admin(_ args: [String], background: Bool) -> Result {
-        let parts = ["/bin/sh", "-c", privilegedWorker, "claude-guard-worker"] + args
-        let wrapped = parts.map(shellQuote).joined(separator: " ")
-        let command = background
-            ? "/usr/bin/nohup " + wrapped + " </dev/null >/dev/null 2>&1 &"
-            : wrapped
-        let script = """
-        on run argv
-            do shell script (item 1 of argv) with administrator privileges
-        end run
-        """
-        return call("/usr/bin/osascript", ["-e", script, command])
-    }
+
 }
 
 @MainActor
 final class GuardController: ObservableObject {
+    let browserDiagnostics = BrowserDiagnostics()
+    let serviceDiagnostics = ServiceDiagnostics()
     @Published var configuration: GuardConfiguration
     @Published private(set) var check: LocalCheck?
     @Published private(set) var status: Snapshot?
-    @Published private(set) var events: [GuardEvent]
+    @Published private(set) var events: [GuardEvent] = []
     @Published private(set) var busy = false
     @Published private(set) var checking = false
     @Published private(set) var detectingEndpoint = false
     @Published private(set) var endpointCandidates: [DetectedEndpoint] = []
-    @Published private(set) var approvedRoute: ApprovedRoute?
     @Published private(set) var active = false
     @Published private(set) var stale = false
     @Published private(set) var countdown: Int?
     @Published var notice: GuardText?
     @Published private var reviewedTransports: [String: TransportEvidence.Kind] = [:]
     @Published private(set) var rates: TunnelRates?
+    @Published private(set) var persistent = false
+    @Published private(set) var serviceAvailable = false
+    @Published private(set) var canResumeSaved = false
+    @Published private(set) var paused = false
+    @Published var riskKey = ""
+    @Published private(set) var automaticEnabled = true
+    @Published private(set) var automaticChecking = false
+    private var nextAutomaticCheck = Date.distantPast
+    private var automaticGeneration = 0
+    private var automaticFingerprint: String?
+    private var requestedProfileAccess = false
+    private var automaticIssue: AutomaticSetupIssue?
+    private var controlRevision: String?
+    private var revalidationRoute: GuardianRoute?
+    #if GUARD_DIAGNOSTICS
+    private var diagnosticAutomaticAttempts = 0
+    #endif
 
-    private let runtime = URL(fileURLWithPath: "/var/run/org.claudeguard.runtime", isDirectory: true)
     private var lastImportedLine: String?
     private var lastJournalText: String?
     private var requestSession: String?
     private var pendingAt: Date?
     private var timer: Timer?
     private var previousCounter: TunnelCounters?
+    private var pollingService = false
+    private var reviewedNodeLink: String?
     private let preview: Bool
     private let preferences = UserDefaults.standard
 
@@ -207,24 +224,26 @@ final class GuardController: ObservableObject {
                            english: GuardCopy.reason("settling").en, ip: nil),
             ]
             check = LocalCheck(system: "macOS", defaultInterface: "utun6", tunnels: ["utun6"], vpnConnected: true, pfPresent: true)
-            let demo = "demo|OPEN|" + String(Date().timeIntervalSince1970) + "|utun6|-|-|stable-open|0|live|1|||" + GuardPolicy.id
+            let demo = "demo|OPEN|" + String(Date().timeIntervalSince1970) + "|utun6|-|-|stable-open|0|live|1|||" + GuardPolicy.id + "|" + String(Date().timeIntervalSince1970)
             status = Snapshot(demo)
             reviewedTransports = [configuration.endpointKey: .reality]
             rates = TunnelRates(received: 126000, sent: 18400)
             active = true
+            serviceAvailable = true
+            persistent = true
+            canResumeSaved = true
             return
         }
         if let data = preferences.data(forKey: "configuration"),
            let saved = try? JSONDecoder().decode(GuardConfiguration.self, from: data) {
             configuration = saved
         } else { configuration = GuardConfiguration() }
+        configuration.adminSource = nil
         if let data = preferences.data(forKey: "events"),
            let saved = try? JSONDecoder().decode([GuardEvent].self, from: data) {
             events = saved
         } else { events = [] }
-        if let data = preferences.data(forKey: "approvedRoute") {
-            approvedRoute = try? JSONDecoder().decode(ApprovedRoute.self, from: data)
-        }
+        preferences.removeObject(forKey: "approvedRoute")
         if let data = preferences.data(forKey: "reviewedTransports"),
            let saved = try? JSONDecoder().decode([String: TransportEvidence.Kind].self, from: data) {
             reviewedTransports = saved
@@ -237,12 +256,13 @@ final class GuardController: ObservableObject {
     }
 
     var canGoLive: Bool {
-        guard !busy, !detectingEndpoint else { return false }
+        guard serviceAvailable, !stale, !busy, !detectingEndpoint else { return false }
+        if paused { return canResumeSaved }
         if !active {
-            return approvedRoute?.endpointKey == configuration.endpointKey && approvedRoute?.expected == configuration.exit
+            return canResumeSaved
         }
         guard let status, !stale, !legacyPolicy, status.trialVerified else { return false }
-        return ["trial", "paused"].contains(status.mode) && !["ERROR", "DRIFT"].contains(status.phase)
+        return status.mode == "trial" && !["ERROR", "DRIFT"].contains(status.phase)
     }
     var legacyPolicy: Bool {
         active && status.map { ["OPEN", "LOCKED"].contains($0.phase) && $0.policyID != GuardPolicy.id } == true
@@ -252,15 +272,39 @@ final class GuardController: ObservableObject {
         active && !stale && !legacyPolicy && status.map { ["OPEN", "LOCKED"].contains($0.phase) } == true
     }
 
-    var isOpen: Bool { rulesConfirmed && status?.phase == "OPEN" && !isRechecking }
+    var isOpen: Bool {
+        rulesConfirmed && status?.phase == "OPEN" && !isRechecking && status?.riskCheckedAt.map {
+            (0..<3600).contains(Date().timeIntervalSince($0))
+        } == true
+    }
     var isRechecking: Bool { status?.reason == "probe-retry" && active && !stale }
-    var mayRestore: Bool { active && !busy }
+    var mayRestore: Bool { (active || persistent || canResumeSaved || paused) && !busy }
+    var mayPause: Bool { active && !paused && status?.mode == "live" && !busy }
+
+    var riskStatus: GuardText {
+        if isOpen { return GuardText("Risk check passed") }
+        switch status?.reason {
+        case "risk-review": return GuardText("Risk check in progress")
+        case "risk-rejected": return GuardText("Risk policy denied release")
+        case "risk-rate-limited": return GuardText("Risk check deferred")
+        default: return GuardText("Risk evidence unavailable")
+        }
+    }
+
+    func openRecovery() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.arguments = ["--recovery"]
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in }
+    }
     var currentTransport: TransportEvidence.Kind {
         reviewedTransports[configuration.endpointKey] ?? .unknown
     }
 
     var stateTitle: GuardText {
         if busy { return GuardText("Working") }
+        if !serviceAvailable && !preview { return GuardText("Install the system guardian") }
+        if paused { return GuardText("Protection paused") }
         if stale { return GuardText("Guardian unavailable") }
         if legacyPolicy { return GuardText("Restart protection") }
         if isRechecking { return GuardText("Rechecking exit") }
@@ -276,12 +320,16 @@ final class GuardController: ObservableObject {
 
     var stateExplanation: GuardText {
         if let notice { return notice }
+        if !serviceAvailable && !preview { return GuardText("Open the private installer to install the system guardian. macOS asks for administrator authorization.") }
         if stale { return GuardText("The rule state cannot be confirmed. Use Restore network on this Mac.") }
         if legacyPolicy {
-            return GuardText("An earlier policy is active. Close Claude, restore networking locally, then enable the new policy.")
+            return GuardText("An earlier policy is active. Close your apps, restore networking locally, then enable the new policy.")
+        }
+        if !active && !automaticEnabled {
+            return GuardText("Automatic protection is disabled. Enable it to resume detection and enforcement.")
         }
         guard let status else {
-            return GuardText("Detect the Shadowrocket tunnel and confirm the node to start a 60-second trial.")
+            return GuardText("Shadowrocket is checked automatically. Apps are released only after tunnel stability and risk checks pass.")
         }
         if status.phase == "IDLE" {
             return status.reason == "trial-ended" ? GuardCopy.reason("trial-ended")
@@ -312,6 +360,16 @@ final class GuardController: ObservableObject {
             }
             add("detect", GuardText("Default interface %1$@. Tunnel interfaces found: %2$@.", .plain(current.defaultInterface), .plain(String(current.tunnels.count))))
         }
+    }
+
+    func openBrowserDiagnostics(language: GuardLanguage, appearance: GuardAppearance) {
+        guard isOpen, !busy, let status, status.mode == "live" else { return }
+        browserDiagnostics.start(status, language: language, appearance: appearance)
+    }
+
+    func openDiagnosticSite(_ site: ExternalDiagnosticSite) {
+        guard isOpen, !busy, status?.mode == "live" else { return }
+        NSWorkspace.shared.open(site.url)
     }
 
     func detectEndpoint() {
@@ -347,16 +405,15 @@ final class GuardController: ObservableObject {
             return
         }
         let evidence = TransportEvidence.inspect(text, endpoint: endpoint)
-        if evidence.kind != .unknown || reviewedTransports[evidence.endpointKey]?.blocksActivation != true {
-            reviewedTransports[evidence.endpointKey] = evidence.kind
-            if let encoded = try? JSONEncoder().encode(reviewedTransports) {
-                preferences.set(encoded, forKey: "reviewedTransports")
-            }
+        reviewedTransports[evidence.endpointKey] = evidence.kind
+        if let encoded = try? JSONEncoder().encode(reviewedTransports) {
+            preferences.set(encoded, forKey: "reviewedTransports")
         }
-        if reviewedTransports[evidence.endpointKey]?.blocksActivation == true {
+        if evidence.kind.blocksActivation {
             notice = GuardText("Use a node link with authenticated encryption and certificate verification enabled.")
             return
         }
+        reviewedNodeLink = text
         useEndpoint(endpoint)
     }
 
@@ -369,57 +426,238 @@ final class GuardController: ObservableObject {
         notice = GuardText("Filled %1$@. Confirm the node and complete a trial.", .plain(endpoint.label))
     }
 
+    func retryAutomaticSetup() {
+        // Only an explicit operator retry may reopen the native access dialog.
+        // A failed bookmark must not create an unattended prompt loop.
+        requestedProfileAccess = false
+        automaticGeneration += 1
+        automaticCheck(force: true)
+    }
+
+    private func completeProfileAccess(granted: Bool, generation: Int, userInitiated: Bool) {
+        guard granted, generation == automaticGeneration, !paused, userInitiated || automaticEnabled else { return }
+        automaticCheck(force: userInitiated)
+    }
+
+    private func clearRecoveredAutomaticIssue() {
+        if let issue = automaticIssue, notice == issue.message { notice = nil }
+        automaticIssue = nil
+    }
+
+    #if GUARD_DIAGNOSTICS
+    static func automaticIssueLifecycleSelfTest() -> Bool {
+        let controller = GuardController(preview: true)
+        controller.automaticIssue = .probeResponse
+        controller.notice = AutomaticSetupIssue.probeResponse.message
+        guard controller.report(language: .english).contains("probeResponse") else { return false }
+        controller.clearRecoveredAutomaticIssue()
+        guard controller.notice == nil, controller.automaticIssue == nil,
+              !controller.report(language: .english).contains("probeResponse") else { return false }
+        controller.automaticIssue = .disconnected
+        controller.notice = GuardText("Report exported.")
+        controller.clearRecoveredAutomaticIssue()
+        guard controller.automaticIssue == nil && controller.notice == GuardText("Report exported.") else { return false }
+        controller.automaticGeneration = 0
+        controller.automaticEnabled = true
+        controller.active = false
+        let oldGeneration = controller.automaticGeneration
+        let oldRevision = UUID().uuidString.lowercased()
+        controller.controlRevision = oldRevision
+        var restored = GuardianResponse(code: 0)
+        restored.automaticEnabled = false
+        restored.controlRevision = UUID().uuidString.lowercased()
+        controller.applyServiceState(restored)
+        var oldState = GuardianResponse(code: 0)
+        oldState.controlRevision = oldRevision
+        controller.finishPoll(oldState, generation: oldGeneration)
+        guard !controller.automaticEnabled, controller.controlRevision == restored.controlRevision else { return false }
+        controller.completeProfileAccess(granted: true, generation: oldGeneration, userInitiated: false)
+        controller.completeProfileAccess(granted: true, generation: oldGeneration, userInitiated: true)
+        controller.completeProfileAccess(granted: true, generation: controller.automaticGeneration, userInitiated: false)
+        guard controller.diagnosticAutomaticAttempts == 0 else { return false }
+        controller.completeProfileAccess(granted: true, generation: controller.automaticGeneration, userInitiated: true)
+        return controller.diagnosticAutomaticAttempts == 1
+    }
+    #endif
+
+    func automaticCheck(force: Bool = false) {
+        #if GUARD_DIAGNOSTICS
+        if preview { diagnosticAutomaticAttempts += 1; return }
+        #endif
+        guard !preview, serviceAvailable, !busy, !automaticChecking, !paused,
+              !(active && status?.mode == "trial"),
+              force || automaticEnabled, force || Date() >= nextAutomaticCheck else { return }
+        guard let revision = controlRevision else { return }
+        automaticChecking = true
+        nextAutomaticCheck = Date().addingTimeInterval(30)
+        let generation = automaticGeneration
+        let region = configuration.approvedRegion ?? "US"
+        let fingerprint = automaticFingerprint
+        let currentActive = active
+        let rediscover = force || status?.reason == "exit-mismatch"
+        let revalidation = revalidationRoute
+        Task { [self] in
+            do {
+                let result = try await Task.detached { () -> AutomaticRoute? in
+                    if currentActive, !rediscover, let fingerprint,
+                       try ShadowrocketAccess.readCurrent().fingerprint == fingerprint { return nil }
+                    return try AutomaticRoute.read(region: region, revalidation: revalidation)
+                }.value
+                defer { automaticChecking = false }
+                guard generation == automaticGeneration, !paused, (force || automaticEnabled) else { return }
+                guard let result else {
+                    if isOpen { clearRecoveredAutomaticIssue() }
+                    return
+                }
+                configuration = GuardConfiguration(peer: result.route.peer, port: result.route.port,
+                    transport: result.route.transport, expected: result.route.expected, interface: result.route.interface,
+                    approvedRegion: region)
+                reviewedTransports[configuration.endpointKey] = result.profile.security
+                let request = GuardianRequest(.activate, session: UUID().uuidString.lowercased(), route: result.route,
+                    profileEvidence: TransportEvidence(endpointKey: result.route.endpointKey, kind: result.profile.security),
+                    profileFingerprint: result.profile.fingerprint, profileServer: result.profile.host,
+                    controlRevision: revision, userInitiated: force)
+                busy = true
+                let response = await Task.detached { GuardianClient.send(request) }.value
+                busy = false
+                guard generation == automaticGeneration else { refresh(); return }
+                applyServiceState(response)
+                if response.code == 0 {
+                    automaticFingerprint = result.profile.fingerprint
+                    automaticIssue = nil
+                    notice = nil
+                } else if force || response.code != 79 { notice = serviceError(response.code) }
+            } catch {
+                automaticChecking = false
+                guard generation == automaticGeneration else { return }
+                let issue = AutomaticSetupIssue(error)
+                automaticIssue = issue
+                if error is ShadowrocketProfile.Failure, active, !paused {
+                    busy = true
+                    let revoked = await Task.detached { GuardianClient.send(GuardianRequest(.invalidate, controlRevision: revision)) }.value
+                    busy = false
+                    guard generation == automaticGeneration else { refresh(); return }
+                    automaticFingerprint = nil
+                    applyServiceState(revoked)
+                    guard revoked.code == 0, revoked.active, !revoked.canResume, !revoked.paused else {
+                        if force || revoked.code != 79 { notice = serviceError(revoked.code) }
+                        return
+                    }
+                }
+                automaticIssue = issue
+                let continuationGeneration = automaticGeneration
+                if let failure = error as? ShadowrocketProfile.Failure, failure == .unavailable, !requestedProfileAccess {
+                    requestedProfileAccess = true
+                    let language = GuardLanguage(rawValue: GuardPolicy.preferences.string(forKey: "language") ?? "") ?? .initial
+                    ShadowrocketAccess.requestReadAccess(language: language) { [weak self] granted in
+                        self?.completeProfileAccess(granted: granted, generation: continuationGeneration, userInitiated: force)
+                    }
+                }
+                notice = issue.message
+            }
+        }
+    }
+
     func begin(trial: Bool) {
-        if !trial && active {
-            guard canGoLive else { return }
+        guard let revision = controlRevision else { return }
+        if !trial && active && !paused {
+            guard canGoLive, let session = status?.session else { return }
             busy = true
+            automaticGeneration += 1
             notice = nil
             Task {
-                let result = await Task.detached { Tools.admin(["continue"], background: false) }.value
+                let response = await Task.detached { GuardianClient.send(GuardianRequest(.commit, session: session,
+                    controlRevision: revision, userInitiated: true)) }.value
                 busy = false
-                if result.code != 0 { notice = GuardText("Protection was not extended. The current rules are still in place.") }
-                refresh()
+                applyServiceState(response)
+                if response.code != 0 { notice = serviceError(response.code) }
+                else { riskKey = ""; reviewedNodeLink = nil }
             }
             return
         }
-        guard !active, !busy, trial || canGoLive else { return }
-        if currentTransport.blocksActivation {
-            notice = GuardText("Use a node link with authenticated encryption and certificate verification enabled.")
-            return
+        guard serviceAvailable, !busy, !active || paused, trial || canGoLive else { return }
+        var route: GuardianRoute?
+        var key: String?
+        var link: String?
+        if trial {
+            if let problem = configuration.problem { notice = problem; return }
+            guard let reviewedNodeLink, let endpoint = DetectedEndpoint.parseShareLink(reviewedNodeLink),
+                  endpoint.id == configuration.endpointKey else {
+                notice = GuardText("Import a node link again before starting a new trial.")
+                return
+            }
+            guard GuardRiskPolicy.validKey(riskKey) else {
+                notice = GuardText("Enter an authorized risk-service key.")
+                return
+            }
+            let cfg = configuration
+            route = GuardianRoute(interface: cfg.interface, peer: cfg.peer, port: cfg.port,
+                                  transport: cfg.transport, expected: cfg.exit,
+                                  region: cfg.approvedRegion ?? "", adminSource: cfg.adminAddress,
+                                  developmentPeer: cfg.developmentPeer)
+            key = riskKey
+            link = reviewedNodeLink
         }
-        if let problem = configuration.problem { notice = problem; return }
-        let cfg = configuration
         let id = UUID().uuidString.lowercased()
+        let request = GuardianRequest(trial ? .trial : .resume, session: id, route: route, riskKey: key, nodeLink: link,
+                                      controlRevision: revision, userInitiated: true)
+        automaticGeneration += 1
         requestSession = id
         pendingAt = nil
         notice = nil
         busy = true
-        if let encoded = try? JSONEncoder().encode(cfg) { preferences.set(encoded, forKey: "configuration") }
-        let savedService = trial ? nil : approvedRoute?.serviceID
-        var workerArgs = ["worker", id, trial ? "trial" : "live", cfg.interface, cfg.peer, cfg.transport, cfg.port, cfg.exit]
-        if let savedService { workerArgs.append(savedService) }
-        let args = workerArgs
+        if let encoded = try? JSONEncoder().encode(configuration) { preferences.set(encoded, forKey: "configuration") }
         Task {
-            let result = await Task.detached { Tools.admin(args, background: true) }.value
-            if result.code != 0 {
+            let response = await Task.detached { GuardianClient.send(request) }.value
+            if response.code != 0 {
                 busy = false
                 requestSession = nil
-                notice = GuardText("Administrator authorization did not complete.")
-                add("start-aborted", GuardText("Administrator authorization was not granted."))
+                notice = serviceError(response.code)
+                add("start-aborted", GuardText("The guardian did not confirm activation."))
             } else {
                 pendingAt = Date()
-                refresh()
             }
+            applyServiceState(response)
+        }
+    }
+
+    func pauseProtection() {
+        guard mayPause, let revision = controlRevision else { return }
+        automaticGeneration += 1
+        browserDiagnostics.stop()
+        serviceDiagnostics.stop()
+        busy = true
+        Task {
+            let response = await Task.detached { GuardianClient.send(GuardianRequest(.pause, controlRevision: revision, userInitiated: true)) }.value
+            busy = false
+            applyServiceState(response)
+            if response.code != 0 { notice = serviceError(response.code) }
+        }
+    }
+
+    private func serviceError(_ code: Int32) -> GuardText {
+        switch code {
+        case 79: return GuardText("Guardian settings changed during this operation. Check the current status and try again.")
+        case 78: return GuardText("Install the matching private application and system guardian package.")
+        case 77: return GuardText("Administrator authorization did not complete.")
+        case 86: return GuardText("Restore the earlier version before installing this guardian.")
+        case 65: return GuardText("The guardian rejected the route, node declaration or risk key.")
+        default: return GuardText("The guardian did not confirm this operation. Check status before retrying.")
         }
     }
 
     func restore() {
         guard !busy else { return }
+        automaticGeneration += 1
+        automaticEnabled = false
+        browserDiagnostics.stop()
+        serviceDiagnostics.stop()
         busy = true
         notice = nil
         Task {
-            let result = await Task.detached { Tools.admin(["stop"], background: false) }.value
+            let result = await Task.detached { GuardianClient.send(GuardianRequest(.restore)) }.value
             busy = false
+            applyServiceState(result)
             refresh()
             if result.code != 0 {
                 notice = GuardText("Recovery did not complete. Try again or restart to clear the session rules.")
@@ -428,20 +666,54 @@ final class GuardController: ObservableObject {
         }
     }
 
-    private func refresh() {
-        let lock = runtime.appendingPathComponent("active", isDirectory: true).path
-        let previousActive = active
-        let currentActive = FileManager.default.fileExists(atPath: lock)
-        if currentActive != active { active = currentActive }
-        let url = runtime.appendingPathComponent("status")
-        let incoming = (try? String(contentsOf: url, encoding: .utf8)).flatMap(Snapshot.init)
-        if incoming != status { status = incoming }
-        let aged = incoming.map { Date().timeIntervalSince($0.time) > 12 } ?? true
-        let nextStale = currentActive && aged
-        if nextStale != stale { stale = nextStale }
-        let left = currentActive ? incoming?.expiration.map { max(0, Int(ceil($0.timeIntervalSinceNow))) } : nil
-        if countdown != left { countdown = left }
 
+    private func refresh() {
+        guard !preview, !pollingService else { return }
+        pollingService = true
+        let generation = automaticGeneration
+        Task {
+            let response = await Task.detached { GuardianClient.send(GuardianRequest(.state)) }.value
+            finishPoll(response, generation: generation)
+        }
+    }
+
+    private func finishPoll(_ response: GuardianResponse, generation: Int) {
+        pollingService = false
+        guard generation == automaticGeneration else { return }
+        applyServiceState(response)
+    }
+
+    private func applyServiceState(_ response: GuardianResponse) {
+        let previousActive = active
+        let knownState = [0, 79].contains(response.code) && response.controlRevision.flatMap(UUID.init(uuidString:)) != nil
+        if knownState {
+            if controlRevision != response.controlRevision {
+                automaticGeneration += 1
+                clearRecoveredAutomaticIssue()
+                controlRevision = response.controlRevision
+            }
+            automaticFingerprint = response.profileFingerprint
+            revalidationRoute = response.revalidationRoute
+            active = response.active
+            persistent = response.persistent
+            canResumeSaved = response.canResume
+            paused = response.paused
+            automaticEnabled = response.automaticEnabled
+            serviceAvailable = true
+        } else if response.code == 78 {
+            serviceAvailable = false
+        } else {
+            serviceAvailable = true
+        }
+        let incoming = response.status.flatMap(Snapshot.init)
+        if incoming != status { status = incoming }
+        let timely = incoming.map { (0...12).contains(Date().timeIntervalSince($0.time)) } ?? false
+        let nextStale = !knownState || (active && (!timely || !response.workerAlive))
+        if nextStale != stale { stale = nextStale }
+        browserDiagnostics.synchronize(incoming, confirmed: rulesConfirmed)
+        serviceDiagnostics.synchronize(incoming, confirmed: isOpen)
+        let left = active ? incoming?.expiration.map { max(0, Int(ceil($0.timeIntervalSinceNow))) } : nil
+        if countdown != left { countdown = left }
         if let pendingAt, let requestSession {
             if incoming?.session == requestSession {
                 self.pendingAt = nil
@@ -453,25 +725,17 @@ final class GuardController: ObservableObject {
                 add("startup-error", GuardText("No status arrived from the local guardian."))
             }
         }
-        if currentActive, !aged, let incoming, incoming.mode == "live", incoming.phase == "OPEN",
-           incoming.trialVerified, let serviceID = incoming.serviceID,
-           incoming.endpointKey == configuration.endpointKey, incoming.expected == configuration.exit {
-            let route = ApprovedRoute(endpointKey: configuration.endpointKey, expected: incoming.expected, serviceID: serviceID)
-            if route != approvedRoute {
-                approvedRoute = route
-                if let encoded = try? JSONEncoder().encode(route) { preferences.set(encoded, forKey: "approvedRoute") }
-            }
-        }
-        importJournal()
+        if knownState, !active, automaticEnabled { automaticCheck() }
+        else if knownState, active, !paused { automaticCheck() }
+        importJournal(response.journal)
         sampleTraffic()
-        if previousActive && !currentActive && incoming?.phase != "IDLE" {
+        if previousActive && !active && incoming?.phase != "IDLE" {
             add("ended", GuardText("The protection session ended."))
         }
     }
 
-    private func importJournal() {
-        let journal = runtime.appendingPathComponent("events")
-        guard let text = try? String(contentsOf: journal, encoding: .utf8),
+    private func importJournal(_ journal: String?) {
+        guard let text = journal,
               text != lastJournalText else { return }
         lastJournalText = text
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
@@ -499,84 +763,45 @@ final class GuardController: ObservableObject {
         if next != rates { rates = next }
     }
 
-    func launch(_ channel: Channel) {
-        guard isOpen else { return }
-        if let url = channel.webURL {
-            NSWorkspace.shared.open(url)
-            return
-        }
-        let path = channel.bundleIDs.compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }.first
-            ?? channel.paths.map { URL(fileURLWithPath: $0) }.first { FileManager.default.fileExists(atPath: $0.path) }
-        guard let path else {
-            notice = GuardText("%1$@ is not installed.", .localized(channel.title))
-            return
-        }
-        NSWorkspace.shared.openApplication(at: path, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-            if error != nil { Task { @MainActor in self.notice = GuardText("Could not open %1$@.", .localized(channel.title)) } }
-        }
-    }
-
     func saveReport(language: GuardLanguage) {
         let dialog = NSSavePanel()
         dialog.allowedContentTypes = [.plainText]
         dialog.nameFieldStringValue = GuardText("Claude Guard Report.txt")[language]
         guard dialog.runModal() == .OK, let url = dialog.url else { return }
-        let rows = events.reversed().map { event in
-            let exit = event.ip.map { " · " + GuardText("Exit ")[language] + $0 } ?? ""
-            return GuardCopy.date(event.at, language) + " · " + GuardCopy.phase(event.state)[language] +
-                " · " + event.description(in: language) + exit
-        }
-        let body = ([
-            GuardText("Claude Guard session report")[language],
-            GuardCopy.date(Date(), language),
-            GuardText("Status ")[language] + stateTitle[language],
-            GuardText("Last detection ")[language] + (check?.system ?? "—"),
-            GuardText("Approved exit ")[language] + (configuration.exit.isEmpty ? "—" : configuration.exit),
-            GuardText("Transport profile ")[language] + currentTransport.title[language],
-            GuardText("Evidence scope ")[language] +
-                GuardText("The exit is checked through the selected tunnel. Packet contents are not collected.")[language],
-            "",
-        ] + rows).joined(separator: "\n")
-        do { try body.write(to: url, atomically: true, encoding: .utf8) }
+        do { try report(language: language).write(to: url, atomically: true, encoding: .utf8) }
         catch { notice = GuardText("Could not write the report. Choose another location."); return }
         notice = GuardText("Report exported.")
     }
-}
 
-enum Channel: String, CaseIterable, Identifiable {
-    case web, desktop, vscode, terminal
-    var id: String { rawValue }
-    var title: GuardText {
-        switch self {
-        case .web: return GuardText("Claude web")
-        case .desktop: return GuardText("Claude desktop")
-        case .vscode: return GuardText("VS Code")
-        case .terminal: return GuardText("Terminal")
+    func report(language: GuardLanguage) -> String {
+        let rows = events.reversed().map { event in
+            return GuardCopy.date(event.at, language) + " · " + GuardCopy.phase(event.state)[language] +
+                " · " + event.description(in: language)
         }
-    }
-    var symbol: String {
-        switch self {
-        case .web: return "globe"
-        case .desktop: return "macwindow"
-        case .vscode: return "chevron.left.forwardslash.chevron.right"
-        case .terminal: return "terminal"
-        }
-    }
-    var webURL: URL? { self == .web ? URL(string: "https://claude.ai/") : nil }
-    var bundleIDs: [String] {
-        switch self {
-        case .web: return []
-        case .desktop: return ["com.anthropic.claudefordesktop"]
-        case .vscode: return ["com.microsoft.VSCode"]
-        case .terminal: return ["com.apple.Terminal"]
-        }
-    }
-    var paths: [String] {
-        switch self {
-        case .web: return []
-        case .desktop: return ["/Applications/Claude.app"]
-        case .vscode: return ["/Applications/Visual Studio Code.app"]
-        case .terminal: return ["/System/Applications/Utilities/Terminal.app"]
-        }
+        let browserRows = browserDiagnostics.evidence.map {
+            [GuardText("Browser network check")[language] + " · " + $0.summary[language],
+             GuardCopy.date($0.checkedAt, language) + " · " + GuardCopy.phase($0.observation.phase)[language],
+             GuardText("Browser test scope")[language]]
+        } ?? []
+        let serviceRows = serviceDiagnostics.results.isEmpty ? [] :
+            [GuardText("Anonymous service path")[language], GuardText("Service path scope")[language]] +
+            serviceDiagnostics.results.map { $0.id + " · " + $0.outcome.title[language] }
+        return ([
+            GuardText("Claude Guard session report")[language],
+            "v" + GuardPolicy.version,
+            GuardCopy.date(Date(), language),
+            GuardText("Status ")[language] + stateTitle[language],
+            GuardText("Last detection ")[language] + (check?.system ?? "—"),
+            GuardText("Automatic setup")[language] + " · " + (automaticIssue.map {
+                $0.rawValue + " · " + $0.message[language]
+            } ?? "—"),
+            GuardText("Transport profile ")[language] + currentTransport.title[language],
+            GuardText("Risk admission")[language] + " · " + riskStatus[language],
+            GuardText("Last risk check")[language] + " · " + (status?.riskCheckedAt.map { GuardCopy.date($0, language) } ?? "—"),
+            GuardText("The approved region, residential classification, low score and clear risk flags are required. Missing or expired evidence keeps apps blocked.")[language],
+            GuardText("Evidence scope ")[language] +
+                GuardText("The exit is checked through the selected tunnel. Packet contents are not collected.")[language],
+            "",
+        ] + serviceRows + browserRows + rows).joined(separator: "\n")
     }
 }

@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C
+[ "$(/usr/bin/id -u)" = 0 ] || exit 77
+[ "${3:-/}" = / ] || exit 1
+exec /Library/PrivilegedHelperTools/org.claudeguard/GuardOfflineRecovery --restore-local

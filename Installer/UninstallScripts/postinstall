@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C
+[ "$(/usr/bin/id -u)" = 0 ] || exit 77
+[ "${3:-/}" = / ] || exit 1
+directory=/Library/PrivilegedHelperTools/org.claudeguard
+if [ -x "$directory/GuardDaemon" ]; then
+  if "$directory/GuardDaemon" --uninstall; then exit 0; fi
+fi
+exec "$directory/GuardOfflineRecovery" --uninstall
