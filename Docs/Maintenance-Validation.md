@@ -45,6 +45,16 @@ Tested independent uninstaller SHA-256: `dc38f2a9267fc36c4d238e2ab40824fdb2ab5c7
 
 The release includes redacted machine-readable results. These checks establish maintenance behavior for the tested packages; they do not reclassify earlier release observations or waived tests.
 
+## Cross-environment regression follow-up
+
+Hosted validation exposed two timing assumptions before publication. The worker fixture now requires the injected failures and a newer accepted response, rather than requiring a transient retry label when recovery completes within the same round.
+
+A separate slow-boundary counterexample reproduced a runtime scheduling defect: repeated unchanged checks used their start time, consuming the remaining retry window while finished request slots were reaped. Build 44 schedules those checks from completion. Evidence expiry and newly changed replies are still evaluated before throttling; proof lifetimes, request budgets and admission dwell are unchanged.
+
+The deterministic regression executes the production pending-evidence and completion functions with a local fixture clock. The old worker seals without retrying; the corrected worker retries and accepts fresh evidence. Additional cases retain immediate rejection for conflicting replies and expired identity/risk, and recheck a changed path on the next tick. A real elapsed-time simulation with bounded additional local-command delays also reproduces the old failure and passes with the correction. These simulations do not modify host networking or the system clock.
+
+Final build 44 package acceptance must be recorded in the release's machine-readable evidence before publication; the build 43 hashes above identify the earlier maintenance run.
+
 ## Limits
 
 The driver reproduces partial deletion; it does not claim GUI testing of every cleaner's proprietary removal strategy. No uninstaller can run a file that another privileged program has also deleted. Keep the standalone release package separately. Unknown PF reference identifiers are preserved if their ownership records are gone; global PF is never disabled to guess at cleanup.

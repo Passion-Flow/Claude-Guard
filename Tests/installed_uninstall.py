@@ -85,7 +85,7 @@ def main():
     for path in (installer, uninstaller, native):
         require(path.is_file() and path.stat().st_uid == 0 and path.stat().st_mode & 0o022 == 0, 'trusted-stage-required')
     require(not APP.exists() and not HELPERS.exists() and empty_anchor(), 'existing-installation-must-be-removed-first')
-    report = {'version': '1.0.1', 'build': 43, 'phase': 'running', 'cases': [],
+    report = {'version': '1.0.1', 'build': 44, 'phase': 'running', 'cases': [],
               'scope': 'Actual local installation and removal; no reboot, GUI cleaner interaction or account-availability claim',
               'sha256': {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (installer, uninstaller)}}
     output = directory / 'result.json'

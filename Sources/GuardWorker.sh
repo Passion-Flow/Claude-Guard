@@ -794,6 +794,11 @@ guard_pending_health() {
   refresh_health_reply
   health_now=$(/bin/date +%s)
   pending_evidence_valid "$health_now" || return 0
+  # Schedule from completion, not the start of a slow boundary check. Reaping
+  # several finished clients in this same tick must not repeat unchanged local
+  # checks until the retry window is gone. Changed replies and both evidence
+  # deadlines are still checked before the throttle on every invocation.
+  health_checked_at=$health_now
   if [ "$health_has_reply" = 1 ] && [ "$probe_observed_at" -gt "$last_verified" ] &&
      [ "$probe_observed_at" -le "$health_now" ]; then
     # The observation chain, current risk and exact boundary all passed.

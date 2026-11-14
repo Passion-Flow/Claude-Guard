@@ -136,10 +136,100 @@ printf '%s|%s|%s' "$accepted" "$handled" "$completion_passes"
         return {"case": "last-child-exits-between-polls", "observation": result.stdout}
 
 
+def slow_boundary_completion(case):
+    """A completed local check must leave time to retry finished transports.
+
+    Only this fixture's clock file advances. The production pending-evidence
+    and completion functions execute, with a two-second boundary check and
+    immediately completed, initially failed children.
+    """
+    with tempfile.TemporaryDirectory(prefix="cg-boundary-completion-") as temporary:
+        root = Path(temporary)
+        for name in ("primary", "backup", "independent"):
+            (root / name).mkdir()
+        (root / "clock").write_text("105\n")
+        (root / "checks").write_text("")
+        setup = f"""
+directory='{root}'; health_round=$directory
+phase=OPEN; health_sealed=0; health_seen_mask=; health_has_reply=0; health_checked_at=0
+health_primary_pid=101; health_backup_pid=102; health_independent_pid=103
+health_primary_attempt_at=100; health_backup_attempt_at=100; health_independent_attempt_at=100
+health_refresh_until=108; last_verified=100
+session=s; vpn_service=v; iface=utun1; endpoint_key=e; expected=192.0.2.42; bound_path=p
+evidence_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
+risk_region=US; risk_key=fixture; risk_checked_at=100; risk_context="$evidence_context|US"
+fixture_now() {{ /bin/cat "$directory/clock"; }}
+rules_intact() {{
+  IFS= read -r stamp < "$directory/clock"
+  printf '%s\\n' "$((stamp + 2))" > "$directory/clock"
+  printf x >> "$directory/checks"
+}}
+underlay_snapshot() {{ printf p; }}
+vpn_connection() {{ printf 'Connected utun1'; }}
+probe_route_reason() {{ return 0; }}
+publish() {{ return 0; }}
+load_phase() {{ return 0; }}
+kill() {{ return 1; }}
+wait() {{ return 0; }}
+start_health_client() {{
+  [ "$1" = primary ] || exit 99
+  printf 'ip=192.0.2.42\\nloc=US\\n' > "$directory/primary.trace"
+  fixture_now > "$directory/primary.stamp"
+  printf x >> "$directory/retried"
+}}
+guard_pending_health
+"""
+        if case == "retry-after-slow-check":
+            setup += "reschedule_completed_health\n"
+        elif case == "unchanged-completed-check":
+            setup += "guard_pending_health\nguard_pending_health\n"
+        elif case == "conflicting-response":
+            setup += """
+printf 'ip=192.0.2.99\\nloc=US\\n' > "$directory/primary.trace"
+printf '107\\n' > "$directory/primary.stamp"
+guard_pending_health
+"""
+        elif case == "identity-expired":
+            setup += "last_verified=94\nguard_pending_health\n"
+        elif case == "risk-expired":
+            setup += "risk_max_age=7\nguard_pending_health\n"
+        elif case == "next-tick-path-change":
+            setup += """
+printf '108\\n' > "$directory/clock"
+underlay_snapshot() { printf changed; }
+guard_pending_health
+"""
+        setup += """
+printf '%s|%s|%s' "$phase" "$last_verified" "${health_seal_reason:-none}"
+"""
+        result = subprocess.run(["/bin/sh", "-c",
+                                 definitions.replace("/bin/date +%s", "fixture_now") + setup],
+                                capture_output=True, text=True, timeout=5)
+        assert result.returncode == 0, result.stderr
+        checks = len((root / "checks").read_text())
+        row = {"case": case, "result": result.stdout, "boundaryChecks": checks,
+               "retried": (root / "retried").exists()}
+        if case == "retry-after-slow-check":
+            assert result.stdout == "OPEN|107|none" and row["retried"] and checks == 2, row
+        elif case == "unchanged-completed-check":
+            assert result.stdout == "OPEN|100|none" and checks == 1, row
+        else:
+            expected = {"conflicting-response": "LOCKED|0|exit-mismatch",
+                        "identity-expired": "LOCKED|0|evidence-expired",
+                        "risk-expired": "LOCKED|0|evidence-expired",
+                        "next-tick-path-change": "SEALED|0|route-changed"}[case]
+            assert result.stdout == expected, row
+            assert checks == (2 if case == "next-tick-path-change" else 1), row
+        return row
+
+
 rows = [coordinator("last-completion", name) for name in ("primary", "backup", "independent")]
 rows.append(coordinator("pending-peer"))
 rows.append(completion_between_polls())
 if not options.expect_counterexample:
+    rows.extend(slow_boundary_completion(case) for case in (
+        "retry-after-slow-check", "unchanged-completed-check", "conflicting-response",
+        "identity-expired", "risk-expired", "next-tick-path-change"))
     rows.extend(coordinator(case) for case in (
         "rejecting-response", "accepted-response", "warming", "window-ended",
         "minimum-spacing", "clock-before-attempt"))
