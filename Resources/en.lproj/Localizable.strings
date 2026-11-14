@@ -17,6 +17,7 @@
 "Approved exit (defaults to node)" = "Approved exit (defaults to node)";
 "Approved tunnel" = "Approved tunnel";
 "Beta" = "Beta";
+"Private edition" = "Private edition";
 "Cancel" = "Cancel";
 "Certificate verification disabled" = "Certificate verification disabled";
 "Checking" = "Checking";
@@ -152,7 +153,7 @@
 "The trial ended and the original rules were restored." = "The trial ended and the original rules were restored.";
 "The trial expired and traffic remains blocked. Continue protection or explicitly restore networking on this Mac." = "The trial expired and traffic remains blocked. Continue protection or explicitly restore networking on this Mac.";
 "The tunnel disappeared. Restore networking and run detection again." = "The tunnel disappeared. Restore networking and run detection again.";
-"This beta cannot validate the current packet-filter layout. Protection was not enabled." = "This beta cannot validate the current packet-filter layout. Protection was not enabled.";
+"This edition cannot validate the current packet-filter layout. Protection was not enabled." = "This edition cannot validate the current packet-filter layout. Protection was not enabled.";
 "This removes the Claude Guard rules. Check the VPN connection separately." = "This removes the Claude Guard rules. Check the VPN connection separately.";
 "Traffic blocked" = "Traffic blocked";
 "Traffic path" = "Traffic path";

@@ -1,6 +1,218 @@
 # Claude Guard engineering roadmap
 
-Updated 2026-11-13. The baseline is the existing `hardening/fail-closed-guardian` working tree, including its uncommitted changes. Milestones below describe acceptance conditions. A simulated result is recorded separately from a signed build or physical-device result.
+Updated 2026-11-15. The baseline is the existing `hardening/fail-closed-guardian` working tree, including its uncommitted changes. Milestones below describe acceptance conditions. A simulated result is recorded separately from a signed build or physical-device result.
+
+## Release candidate acceptance
+
+Build 42 separates request completion from retry eligibility. Deterministic
+controls execute the production coordinator and reproduce two build 41 defects:
+the final completed provider receives no retry when no peer remains alive, and
+a child exiting between completion inspection and a separate liveness poll can
+end the round before its completion is handled. Owned request slots now drain
+through the completion pass. Fresh success, a rejection, a closed launch window
+and restrictive phases still prevent retries without preventing child cleanup.
+The original launch deadline, retry spacing and evidence lifetimes are unchanged.
+Eleven targeted controls pass for the correction; complete frozen-source and
+installed acceptance remain required.
+
+The first frozen build 42 offline run remained continuously OPEN in its slow-work
+cadence case but failed an assertion requiring the older intermediate
+`probe-retry` publication. The corrected coordinator had recovered within the
+same round. The fixture now records both injected transport timeouts and the
+subsequent same-round response, while retaining its continuous-OPEN assertion.
+The full state-machine case still requires an empty-round publication and
+sealing on sustained loss. The original failed run is retained separately;
+this fixture correction does not alter the production worker.
+
+Build 41 passed all 33 offline checks, protected installation with 320 kernel
+readbacks, three XPC identity rejection controls, compilation load, a
+600.067-second warmup and login handoff. Its first primary-only fault control
+failed after 23.513 seconds. The last primary attempt had a TLS peer-closure
+category; other providers were deliberately unavailable. The native supervisor
+removed tunnel permission at proof expiry while default-deny remained, followed
+by automatic re-admission. A separate successful diagnostic used a different
+connection and does not establish that the original request could succeed.
+The retained failure is not a completed fault suite or continuous observation.
+The deterministic scheduling defects do not establish the sole cause of that
+transport incident. Build 42 must pass its own complete acceptance before delivery.
+
+Build 41 was prepared after build 40's first warmup and independent-only
+fault control failed. Build 40 passed all 32 offline checks, its protected
+installation, three installed XPC rejection checks, a subsequent 600.160-second
+warmup, login handoff, and strict primary-only and backup-only controls. The
+initial warmup nevertheless sealed at the identity deadline after three
+unavailable transports. That original failure is retained, not replaced by the
+later warmup. The independent-only control then sealed after repeated encrypted
+DNS timeouts with a one-second cached TTL; contemporary ordinary-service
+requests received responses. This is not a completed fault or continuous pass.
+
+A verified loopback TLS counterexample executes the frozen build 40 independent
+client: a 2.3-second DNS response cannot reach the otherwise available target.
+The correction allows an OPEN lookup to use half of the existing eight-second
+request window and computes the target's remaining time after parsing, reserving
+one second for local work and integer-clock boundaries. A quick lookup still
+leaves time for a slower target. Exhausted budgets and clock reversal reject the
+request. Initial warming keeps its two-second DNS limit. DNS TTLs, twelve-second
+identity authority, one-hour risk authority and stable admission are unchanged.
+Real paired observations also recorded two-second query failures alongside
+four-second successes; separate connections do not prove the counterfactual
+duration of the original request. Build 41 requires its own complete frozen
+source, installed fault and twelve-hour acceptance before delivery.
+
+Build 40 was prepared after build 39's continuous observation failed at
+24,074.458 seconds, after 58,891 OPEN samples and eight real risk renewals.
+The failure captured removal of the tunnel pass with default-deny still present,
+while the last exit observation was six seconds old. Retained events identify
+`risk-invalid-response` during proactive renewal and automatic re-admission
+306 seconds later. The original risk transport outcome and body were not retained;
+the exact incident cannot be attributed to a particular HTTP failure.
+
+A separate real, certificate-verified loopback TLS control reproduces a concrete
+classification defect in the frozen build 39 worker: HTTP 200 followed by a
+truncated body (curl 18) or timeout (curl 28) discards still-valid risk evidence.
+The corrected path treats a narrow list of incomplete-transfer errors as provider
+unavailability. It keeps only the original evidence and deadlines, never grants
+initial admission, and still rejects complete invalid bodies, explicit risk
+rejection, unknown failures and expired evidence. A bounded redacted risk
+transport record is added so future incidents retain the missing distinction.
+Build 40 requires fresh frozen-source, installed-fault and continuous acceptance;
+the build 39 checks below do not satisfy that requirement.
+
+Build 39 removes a reproduced shared DNS dependency in
+active independent continuity. With expired DNS and the trace operator absent,
+the original worker sealed without ever reaching the available independent
+address service. The corrected worker retained OPEN through three fresh
+independent resolutions, without renewing risk or extending either lease.
+This establishes a deterministic reliability defect and its correction; it
+does not establish the cause of build 38's real transport interruption.
+Initial admission retains its original restricted resolver path. Active
+independent continuity uses a separately operated HTTPS resolver, explicit
+tunnel binding, certificate validation and client-subnet suppression. No
+system-resolver or physical DNS fallback was added.
+
+The build 39 private candidate is version 1.0.0. Its production payload remains
+frozen and its continuous gate failed; it is not accepted for delivery. The
+replacement must complete twelve continuous hours, final verification and
+archive checks on its own exact installed payload. Earlier results retain their
+own build and observation scope; failed and interrupted runs are not relabelled.
+
+- [x] Freeze the complete build snapshot and record all three executable hashes.
+- [x] Select one SDK for both Swift compilation and linking. Both universal
+  slices record SDK 27.0 and a minimum deployment target of macOS 13.0.
+- [x] Pass all 31 frozen-build local checks, including native lease expiry,
+  interrupted admission, independent provider scheduling, installer lifecycle,
+  localization, resolver independence and diagnostic privacy.
+- [x] Install the exact candidate with default-deny retained throughout 258
+  sampled kernel checks; automatically re-admit fresh real evidence. Verify
+  closure of the old interface before replacement and exactly one authenticated
+  current application process afterward.
+- [x] Reject an unpinned caller at all three actual installed XPC listeners.
+- [x] Complete two simultaneous native compilation controls while protection
+  remains OPEN. Resource observations include the worker's current descendants.
+- [x] Complete the candidate's 600.102-second initial observation with no
+  non-OPEN sample.
+- [x] Complete actual login handoff, four selective provider/operator-loss
+  controls, and the eleven installed fault scenarios. Each selective control
+  requires fifteen additional uninterrupted seconds after injection ends.
+  Trace-operator loss crosses actual independent DNS expiry and records a
+  fresh independent resolution without changing the original risk timestamp.
+- [x] Observe physical test flows after recovery and preserve any unavailable
+  address-family positive controls as unverified.
+- [ ] Complete twelve continuous hours with original evidence lifetimes and
+  real provider renewals, then verify the installed payload and current policy.
+- [ ] Assemble and verify the matched installer, image, source and evidence
+  archive before publishing checksums and the private release.
+
+The build 39 fault suite exercised worker termination, force-kill and stall,
+supervisor loss, restrictive rule drift, VPN loss, Wi-Fi loss, total proof loss,
+actual anonymous Chromium requests, userspace Tailscale SSH and physical packet
+controls. The Chromium main-document requests received HTTP responses before
+and after sealing and no HTTP response while sealed. An HTTP 403 response is
+connection evidence, not successful account access. IPv4 negative packet
+controls have a working approved-node positive control; IPv6 lacks an equivalent
+working physical positive path on this host. Login-agent handoff is not a
+FileVault cold-boot result. These limits remain separate from a passing test.
+
+Two earlier build 39 observations remain retained. The first backup-provider
+control lost native permission at the original identity deadline; its
+contemporaneous transport cause was not captured and remains unresolved.
+Another independent-provider control was incorrectly reported as passed by an
+observer that waited for recovery after the injection window. It contained a
+real seal after independent resolver timeouts. Ordinary service responses and
+node TCP reachability during that interval do not establish fresh exit identity
+or a whole-network outage. The corrected observer requires continuous OPEN,
+the same session, fresh permissions and exact kernel rules throughout its tail.
+Regression controls reject a delayed seal followed by recovery, changed session,
+lost permission and changed rules. The subsequent strict suite passed without a
+production change. The original reports and their corrected interpretations
+remain part of the delivery evidence; a later pass does not erase them.
+
+The exact frozen build source and subsequent acceptance-only test amendment are
+recorded separately. Documentation updates after the freeze do not modify the
+installed payload. All original DNS, transport, identity and risk deadlines
+remain in force: unrelated web connectivity cannot authorize traffic when the
+required exit evidence has expired.
+
+Build 38 completed its initial 600.329-second observation, login handoff, all
+three selective provider-loss controls and all eleven fault scenarios. The
+later continuous-OPEN observation failed at 8,888.466 seconds after four real
+risk renewals. All three worker transports timed out; separate system TLS
+clients also timed out before native revocation. The first failure readback
+still contained the tunnel pass at observation age 12; a readback 0.240 seconds
+later confirmed its removal while default-deny remained. Automatic re-admission
+followed without an operator command. This is a retained continuity failure,
+not a completed twelve-hour pass or proof of physical direct leakage.
+
+No production timeout or evidence lifetime has been relaxed. A bounded read-only
+diagnostic now compares ordinary anonymous service requests, approved-node TCP
+bootstrap, independent-provider DNS freshness and the active worker request
+stage. It cannot authorize traffic, repair policy or turn the failed observation
+into a pass. The shared transport interruption's cause remains unresolved, so
+release assembly remains blocked by its acceptance checks.
+
+Build 37 passed all three ninety-second provider-loss controls and all eleven
+fault scenarios. Its later read-only observation recorded 2,061.793 seconds with
+no non-OPEN sample and one real renewal before being deliberately superseded for
+build 38. This was not a twelve-hour pass. Selecting one compiler SDK changed the
+privileged executable hashes despite unchanged privileged source; build 38
+therefore receives fresh installed acceptance.
+
+The original build 37 fault run retained an indeterminate PF-readback failure.
+A separate unreferenced-anchor experiment reproduced macOS returning partial
+rule output with exit status zero and a Resource busy diagnostic during a
+concurrent commit. The observer now discards those partial results and retries
+only that exact diagnostic, at most three times, without holding a writer lock.
+Complete missing rules, disabled filtering, unknown errors and expired evidence
+still fail immediately. The original report lacked the diagnostic and remains
+indeterminate; the successful subsequent run does not rewrite it.
+
+## Earlier scheduling investigation
+
+Build 36 passed the following checks: all 29 offline checks, exact protected
+installation, 600 seconds of continuous OPEN observation, real login handoff,
+90 seconds of trace-provider loss, and eleven installed fault scenarios. The
+following continuous observation failed after 21.754 seconds: the native lease
+revoked permission at observation age 12, with default-deny present and no tunnel
+pass rule. This is a retained availability failure, not a passing long soak or
+observed direct-path leak. Two providers recorded TLS peer closure after one
+trace provider had succeeded. A paired independent diagnostic saw both system
+TLS backends time out during that interval; changing TLS backend is not an
+evidence-backed fix.
+
+The investigation also reproduced a scheduler defect with the actual shell
+definitions: a healthy primary or backup trace provider waited behind slow peers
+before its next request, whereas the independent provider already had a refresh
+slot. With the same response schedule, the former providers lost continuity and
+the latter remained OPEN. The next candidate gives every provider a bounded,
+nonoverlapping refresh slot. Joining and checking the previous result before
+reuse preserves conflicting-response rejection. All original identity/risk
+lifetimes and initial/recovery admission requirements remain unchanged.
+
+Elapsed-time counterexamples now cover each provider, a slow subsequent response,
+repeated conflicting replies, request overlap and retry count. This establishes
+the scheduler correction independently of the external TLS incident. It does not
+claim the external interruption's root cause is known. Full frozen-candidate
+offline and installed acceptance must pass before delivery.
 
 ## Product requirements
 
@@ -152,6 +364,9 @@ Engineering run identifiers refer to private, redacted retained evidence outside
 
 | Build 30 pending-reply repair | A real elapsed-time control reproduced a matching reply arriving within the old lease but being held behind a slow peer until expiry. Completed evidence is now processed while other requests remain pending; every update rechecks the original identity/risk leases, exact route/service context and filter. Expiry, mismatches and rule/path failures seal without waiting for another child. Response timestamps originate at completed transport, before local validation. Sixty root-only diagnostic rows retain transport categories without addresses or bodies. | Universal build/payload checks and all local CI checks passed, including full worker lifecycle, cadence, actual pending-reply/expiry controls, risk/cache, independent continuity, native fence/control, restart/migration, installer, browser, localization and the engineering harness. The harness now preserves the actual transport exit status and completion timestamp; success/failure controls exercise the transformation without host networking. One parallel-build cadence attempt timed out in its fixture clock setup; the unchanged cadence control subsequently passed. Installed observation remains pending. Request budgets, admission dwell and evidence/risk expiry are unchanged. This timing counterexample does not establish a single cause for every retained build 29 failure. |
 
+| Build 30 / runs 58 and 59 | Exact protected installation and local Resume passed. Real health diagnostics identified two intentionally terminated trace requests plus independent transport timeouts at the four-second deadline. The simultaneous two-compile control completed in 16.3 seconds. | Production continuity failed after 120 seconds; the request-failure control failed after 9.1 seconds. Compilation continued after that failure, so it is not a passed continuity-under-load result. Both failures and actual transport categories are retained. |
+| Build 31 bounded slow continuity | OPEN health requests receive up to eight seconds while pending-proof processing independently enforces the unchanged twelve-second identity lease and original risk expiry. Initial/recovery health requests retain four seconds. A completed independent client can restart at the next proof interval while slow trace peers remain pending; every rejecting peer response is still processed, and fast failures cannot cause a retry storm. Empty replies cannot renew identity; absolute expiry replaces the fast-failure count as the retry bound. Native shutdown revokes OPEN before allowing ten seconds to drain bounded children. | Development and offline/installed acceptance are pending. No policy evidence or production clock/cache timestamp is modified to obtain a pass. |
+
 Three-minute mixed idle/fault resource samples were recorded with the dashboard visible. Later production OPEN samples and the real renewal observation have their separate scope above. They do not establish indefinite availability. Kernel-mode Tailscale, Ethernet, unattended cold connection and the interval before startup observation remain explicit gates. The actual restart exposed a vendor-extension availability gap. A login-session handoff now starts only the signed vendor app for the same previously approved persistent profile, without granting network permission; installed acceptance of that change is pending. The actual menu panel and its dashboard button passed after the operator opened the status item.
 
 Hosted CI for the previous commit never started a step because of an account billing/spending restriction. Its failure is not a code-test failure or a pass. The same workflow checks were executed locally. No billing settings were changed.
@@ -169,6 +384,202 @@ TLS setup receives each request's total budget rather than a fixed 1.5-second su
 Only a locked admission batch may retry a connection without an HTTP response, at most three connections charged to a persistent daily ceiling. Each retry publishes a restrictive heartbeat without renewing exit identity. HTTP errors, invalid bodies and negative verdicts do not cause this immediate retry. OPEN renewal remains one connection attempt. Controls cover transient recovery, quota denial, original cache age, restart-persistent spacing and UTC budget rollover. No physical DNS fallback, risk-condition relaxation or cache injection is used for live acceptance.
 
 ## Observation scheduling correction
+
+### Evidence ordering and acceptance convergence
+
+The next candidate distinguishes an observation's completion time from the
+time its result is processed. While still OPEN, a matching observation may
+continue the same identity chain only when its gap from the previous
+observation and its current age are each at most twelve seconds. Current risk,
+session, route, service and filter checks must also pass. A completed
+observation is sampled again after local boundary work. Future observations,
+an expired chain, a changed context and any negative reply are rejecting.
+Once LOCKED or SEALED, a reply cannot revive the old authorization; the full
+admission dwell is required. No lease or risk lifetime is extended.
+
+A root-only atomic `evidence` record separates publication time, actual exit
+observation time and risk time. Installed observers must check these distinct
+values and current binding rather than infer proof freshness from a heartbeat.
+This private record is not included in shared reports.
+
+The deterministic ordering control reproduces the old on-time-response failure
+before the change, then covers twenty state transitions and 289 observation-gap
+and processing-age combinations. Actual elapsed-time streaming and the
+production-cadence fixture pass for the candidate. Full offline and installed
+acceptance remain pending; these results do not certify a release.
+
+The first convergence candidate passed its offline controls but failed actual
+acceptance: initial admission exceeded the 240-second controller deadline, and
+a later observation found an expired chain. A new independent observer then
+captured the accepted observation timestamp moving backwards while the worker
+still reported OPEN. Both failures are retained. A completed health round could
+select an older peer after a newer streamed independent response had already
+been accepted; the outer decision then overwrote the newer timestamp. Every
+proof writer now uses one context-bound, monotonic update. The actual outer
+production decision has a regression counterexample, rather than only a test
+of the pending-response helper.
+
+The settling scheduler also measures its interval from the completed
+observation. Work already spent waiting for a peer, checking the route or
+reading back rules is not followed by another full settling delay. Six real
+observations, the fifteen-second span and the eight-second maximum admission
+gap remain unchanged. Five deterministic scheduling controls cover completed
+work, partial intervals, OPEN cadence and missing initial evidence.
+
+Build 32 passed all twenty checks in its frozen workflow snapshot. Its exact
+installed component hashes matched the expanded package, and normal
+administrator Resume completed real admission in approximately 42.2 seconds.
+Previously accepted risk retained its original age; no clock, approval or
+cache timestamp was changed. The subsequent stability/fault campaign remains
+pending. An additional isolated controller fixture validates PID-reuse
+protection, bounded environment restoration and HTTP reachability semantics.
+The actual browser control uses a fresh Chromium profile and the debugging
+pipe, so network sealing does not remove its observation channel. No user
+browser account, cookie or candidate address is retained. HTTP errors count
+as reachability, never as proof of interception.
+
+Acceptance classifies availability and protection separately. A provider-loss
+control expects continuous OPEN only while an independent, matching observation
+actually continues the unexpired chain. If all providers become unavailable,
+the required outcome is bounded sealing followed by fresh automatic admission,
+with no physical application or DNS bypass. Such sealing is not itself a false
+positive. Neither a status label nor a failed request alone proves the packet
+boundary; packet and recovery evidence are separate requirements.
+
+### Installed convergence evidence and remaining scheduling work
+
+Build 32 completed a 600.2-second observation with 1,467 OPEN samples and no
+failed check. Two concurrent optimized compilation controls ran during that
+window. Installed worker TERM/KILL/STOP, supervisor death, restrictive rule
+drift, VPN disconnection, Wi-Fi loss and complete health-request loss all
+sealed and automatically re-admitted real provider evidence. The bounded
+controller restored only the physical Wi-Fi setting when that test required
+it; it did not clear protection or inject admission evidence. Individual
+failures and the subsequent observations are retained separately.
+
+Actual Chromium controls used fresh profiles, uncached anonymous document
+requests and new WebRTC connections. Protected and recovered phases returned
+HTTP responses and the approved reflexive candidate; the sealed phase returned
+neither. An earlier recovered-browser failure coincided with a new evidence
+expiry and remains retained. HTTP 403 establishes network reachability, not
+account availability. Later controls recorded protection state continuously
+during browser execution. Existing and fresh userspace Tailscale SSH failed
+during VPN loss; a fresh SSH connection succeeded after automatic admission.
+
+Physical IPv4 DNS UDP/TCP, TCP 853/443 and UDP 443 controls observed no matching
+physical headers, while the approved-node positive control succeeded. Both
+OPEN and sealed phases were observed. Aggregate PF counters are corroboration,
+not per-flow attribution or an external wire capture. IPv6 lacked an equivalent
+working positive path; its observations remain partial, rather than passing
+because a socket could not route.
+
+The attempted twelve-hour observation stopped after 374.0 seconds on an OPEN
+publication with proof age thirteen seconds. That result is a failure, not a
+completed soak. A follow-up observer captures immediate kernel readback and
+the sealing transition, so delayed status publication is not confused with
+continued kernel permission. The first failure did not retain that additional
+boundary evidence and does not independently establish a physical bypass.
+
+A separate elapsed-time counterexample shows that synchronous risk renewal
+could begin with insufficient identity time remaining and then require
+sealing. Build 33 schedules renewal from a fresh accepted proof, including a
+streamed proof while another peer is pending. It reserves ten seconds for two
+four-second network budgets and local work; otherwise it defers the lookup
+without changing accepted timestamps. Controls cover deferral, successful
+streamed renewal, rejection, expired identity and foreign binding.
+
+The former continuity provider's actual resolved address belonged to the
+[Cloudflare ranges](https://www.cloudflare.com/ips/), so a different domain did
+not establish infrastructure diversity from the trace peers. AWS Check IP
+returned the same approved address in three actual tunnel-bound HTTPS controls.
+The candidate uses that service and a hostname-bound, TTL-limited resolver
+cache. Controls reject legacy/foreign cache entries, time rollback, expiry,
+invalid TTLs, wrong DNS questions, private addresses and the node itself.
+Build 33 passed its 23 offline checks, a ten-minute installed observation,
+provider-loss continuity, login-agent handoff and functional fault recovery.
+The handoff exercised the installed login agent after vendor UI and VPN stop;
+it was not a reboot or a FileVault-unlock test. A first thirty-second handoff
+deadline failed and remains recorded; the measured vendor launch was about
+31.5 seconds. IPv6 packet controls lacked an equivalent working positive path
+and remain unverified.
+
+A subsequent audit invalidated the build's full acceptance. Its worker-stall
+report contained seven samples of a live tunnel rule with proof age thirteen
+through fifteen seconds, and total proof loss contained another age-thirteen
+sample. The controller had checked eventual sealing and recovery but omitted
+the live-rule proof deadline. Physical default deny remained present; these
+observations do not establish physical direct bypass. The attempted long
+observation was deliberately stopped and is not a completed soak.
+
+Build 34 adds revocation-only native observation supervision. The root guardian
+checks the atomic proof's session, service, interface, endpoint, exit, original
+observation and risk times independently of the UI heartbeat. Neither a new
+heartbeat nor repeated reads renew an old proof. Monotonic elapsed time also
+bounds the saved observation and risk lifetimes. Startup grace cannot shield
+expired OPEN evidence. The single control owner checks every 250 milliseconds;
+PF writer scheduling and completion remain bounded user-space operations,
+not a hard-real-time kernel expiry guarantee.
+
+Evidence is published before UI status. Both directions of that transition
+are covered: a fresh restrictive publication must not cause a spurious worker
+restart, and fresh OPEN evidence is checked even before the UI status catches
+up. Neither transition creates an admission exception. The old native core
+reproduces retained OPEN after proof expiry under a continuously fresh
+heartbeat; the corrected core seals and subsequently permits fresh admission.
+The installed controller now rejects actual tunnel permission with expired
+proof or risk, separately from late UI publication after the kernel is sealed.
+Build 34 passed all 25 offline checks, 600.1 seconds of installed continuous
+OPEN observation (1,470 samples), concurrent native compilation load, all
+three installed XPC wrong-hash controls, vendor login-agent handoff and a
+ninety-second trace-provider interruption with independent address continuity.
+The first installed worker-restart fault then failed its stricter evidence
+contract: the kernel tunnel rule was committed while the published record
+still showed LOCKED with no risk timestamp. The worker had accepted risk in
+memory but had not published it yet. This is an admission-publication ordering
+failure; it does not by itself establish that the actual risk decision was
+missing or that physical direct traffic bypassed the fence. The failure is
+retained, and the long observation was not started.
+
+Admission now has an explicit prepare/commit protocol. After identity, risk
+and route checks, the worker publishes a complete private ADMITTING record
+while the UI remains LOCKED, then submits and reads back the kernel rules,
+then publishes committed OPEN. A failed preparation cannot reach the rule
+write. A failed rule write cannot publish OPEN. The native supervisor applies
+the original proof and risk deadlines to ADMITTING as well as OPEN, so a
+freeze after the rule write cannot hide behind a restrictive UI status.
+Prepared evidence alone cannot turn the UI green or grant kernel traffic.
+Production-decision and native-supervisor counterexamples reproduce both
+the old publication gap and an interrupted transaction, with fixed-path
+controls for preparation failure, rule failure and subsequent recovery.
+Build 35 passed all 27 offline checks, a 600-second installed observation,
+login handoff, a ninety-second trace-provider loss and eleven strict installed
+fault scenarios. Real anonymous browser requests, fresh WebRTC observations,
+userspace Tailscale SSH interruption/recovery and physical IPv4 packet controls
+passed. IPv6 controls lacked an equivalent working positive path and remain
+unverified; login handoff is not cold-boot evidence.
+
+The subsequent continuous-OPEN observation failed after 7,619 seconds, with
+three actual risk renewals completed. The native supervisor revoked permission
+when exit evidence reached its deadline. Immediate PF readback showed the
+default deny present and no tunnel-pass rule. The last two transport rounds
+contained TLS handshake failures from all three probes. Fresh admission
+recovered automatically; no corrective operator action was issued. This is a
+failed continuous-availability run, not a completed twelve-hour soak and not
+evidence of physical direct leakage. A later paired TLS-backend comparison
+completed 24 matching responses per backend with no failures; it did not
+reproduce or identify the original TLS failure's cause. The deadline and
+admission rules have not been relaxed to turn that run into a pass.
+
+The next candidate removes the Foundation-generated bundle identity from
+explicit anonymous service checks and records only fixed local transport-error
+categories. Actual loopback requests verify header suppression, cookie
+non-replay, credential absence and redirect refusal, with a default-session
+positive control. Hostile-error fixtures verify category-only retention and
+unchanged transport verdicts. Ordinary application HTTPS is not intercepted or
+rewritten. The full request inventory and local-visibility boundary are in
+[network privacy](Privacy.md). The exact candidate still needs installation and
+fresh stability acceptance; these changes do not claim to explain the TLS
+incident.
 
 Health observations retain the completion timestamp of the selected response, including when a slower concurrent response finishes later. Either endpoint's valid different exit is rejecting evidence. A new round starts from the actual observation time, with a two-second target interval and a fixed request budget; filter readback work is included in scheduling rather than added to a count of sleeps. Identity evidence still expires after twelve seconds. Stability requires six actual observations spanning fifteen seconds. A bounded empty round cannot renew identity or waive expiry.
 

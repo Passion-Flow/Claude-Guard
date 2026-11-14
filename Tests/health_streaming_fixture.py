@@ -22,9 +22,10 @@ while [ "$#" -gt 0 ]; do
 done
 case "$url" in
  https://1.1.1.1/*) label=primary;;
- https://api.ipify.org) label=independent;;
+ https://checkip.amazonaws.com) label=independent;;
  *) label=backup;;
 esac
+[ "$label" != independent ] || printf x >> "$root/independent.calls"
 IFS='|' read -r delay unavailable < "$root/$label.settings"
 wait_for=$(/usr/bin/awk -v a="$delay" -v b="$budget" 'BEGIN {print (a<b ? a:b)}')
 /bin/sleep "$wait_for"
@@ -55,10 +56,11 @@ publish() {{ return 0; }}
 '''
 
     def run(scenario, age=7, extra=''):
+        (root / 'independent.calls').write_text('')
         for label, case in scenario.items():
             (root / (label + '.settings')).write_text(str(case.get('delay', .1)) + '|' + str(case.get('unavailable', False)).lower() + '\n')
             (root / (label + '.body')).write_text(case.get('body', 'ip=192.0.2.42\nloc=US\n'))
-        (runtime / 'independent-address').write_text('9.9.9.9|' + str(int(time.time())))
+        (runtime / 'independent-address').write_text('9.9.9.9|' + str(int(time.time())) + '|600|checkip.amazonaws.com')
         (root / 'sealed').unlink(missing_ok=True)
         command = definitions + setup.replace('LAST_AGE', str(age)) + extra + '''
 before=$last_verified
@@ -94,6 +96,36 @@ printf '%s|%s|%s|%s|%s|%s' "$result" "$phase" "$before" "$last_verified" "$probe
     assert output[1] != 'OPEN' and (root / 'sealed').exists(), output
     output, _ = run({name: slow_missing for name in ('primary', 'backup', 'independent')}, age=1)
     assert output[1] == 'OPEN' and output[2] == output[3], 'Missing replies or heartbeats changed the original proof'
+    output, _ = run({'primary': slow_missing, 'backup': slow_missing,
+                     'independent': {'delay': 6, 'body': '192.0.2.42'}}, age=1)
+    assert output[1] == 'OPEN' and output[-1] == 'true' and output[3] == output[4], output
+    output, _ = run({'primary': {'delay': 6}, 'backup': slow_missing,
+                     'independent': slow_missing}, age=1, extra='phase=LOCKED\n')
+    assert output[0] == 'unavailable' and output[1] == 'LOCKED', 'Initial admission used the longer continuity budget'
+    # Two real consecutive rounds: slow trace peers must not delay the next
+    # independent proof until the old lease expires during a later response.
+    (root / 'primary.settings').write_text('9|true\n')
+    (root / 'backup.settings').write_text('9|true\n')
+    (root / 'independent.settings').write_text('0.1|false\n')
+    (root / 'independent.body').write_text('192.0.2.42')
+    (runtime / 'independent-address').write_text('9.9.9.9|' + str(int(time.time())) + '|600|checkip.amazonaws.com')
+    (root / 'sealed').unlink(missing_ok=True)
+    command = definitions + setup.replace('LAST_AGE', '1') + '''
+if sample_exit; then :; fi
+printf '5|false\\n' > ''' + str(root / 'independent.settings') + '''
+if sample_exit; then :; fi
+fresh=false; if identity_fresh "$(/bin/date +%s)"; then fresh=true; fi
+printf '%s|%s' "$phase" "$fresh"
+'''
+    result = subprocess.run(['/bin/sh', '-c', command], capture_output=True, text=True, timeout=32)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == 'OPEN|true' and not (root / 'sealed').exists(), result.stdout
+
+    output, _ = run({'primary': {'delay': 9, 'unavailable': True},
+                     'backup': {'delay': 9, 'unavailable': True},
+                     'independent': {'delay': .1, 'unavailable': True}}, age=1)
+    assert 2 <= len((root / 'independent.calls').read_text()) <= 6, 'Fast failures caused a request storm'
+
     for extra in ('risk_checked_at=1\n', 'underlay_snapshot() { printf changed; }\n',
                   'rules_intact() { return 1; }\n'):
         output, _ = run({'primary': {'delay': .1}, 'backup': slow_missing, 'independent': slow_missing}, extra=extra)

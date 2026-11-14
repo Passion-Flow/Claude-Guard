@@ -70,7 +70,7 @@ enum GuardAppearance: String, CaseIterable {
 
 enum GuardPolicy {
     static let id = GuardianSchema.policy
-    static let version = "0.4.0"
+    static let version = "1.0.0"
     static let preferences = UserDefaults(suiteName: "org.claudeguard.appearance") ?? .standard
 }
 
@@ -103,7 +103,7 @@ enum GuardCopy {
         "probe-retry": GuardText("A probe timed out. The original tunnel is still connected and direct traffic remains blocked while the check retries."),
         "probe-failed": GuardText("Exit checks failed. App traffic remains blocked."),
         "exit-mismatch": GuardText("The observed exit differs from the approved exit. App traffic remains blocked."),
-        "pf-layout": GuardText("This beta cannot validate the current packet-filter layout. Protection was not enabled."),
+        "pf-layout": GuardText("This edition cannot validate the current packet-filter layout. Protection was not enabled."),
         "tunnel-unverified": GuardText("The selected tunnel could not be matched to the Shadowrocket service. Run detection again."),
         "revalidating": GuardText("The original Shadowrocket service has a tunnel. Exit validation is restarting."),
         "vpn-wait": GuardText("Waiting for the original Shadowrocket service. App traffic remains blocked."),

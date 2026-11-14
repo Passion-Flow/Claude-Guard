@@ -1,5 +1,54 @@
 import Foundation
 
+enum GuardianConsole {
+    /// Explicit administrator action using the same authenticated XPC operation
+    /// as the dashboard. It cannot approve a new route or grant OPEN directly.
+    static func resume(uid: UInt32, exchange: (GuardianRequest) -> GuardianResponse) -> Int32 {
+        guard uid == 0 else { return 77 }
+        let state = exchange(GuardianRequest(.state))
+        guard state.code == 0 else { return state.code }
+        guard state.canResume else { return 82 }
+        guard let revision = state.controlRevision, UUID(uuidString: revision) != nil else { return 74 }
+        var session = UUID().uuidString.lowercased()
+        if state.active && !state.paused,
+           let current = state.status?.components(separatedBy: "|").first,
+           UUID(uuidString: current) != nil { session = current }
+        return exchange(GuardianRequest(.resume, session: session,
+                        controlRevision: revision, userInitiated: true)).code
+    }
+
+    #if GUARD_DIAGNOSTICS
+    static func selfTest() -> Bool {
+        let revision = UUID().uuidString
+        let session = UUID().uuidString.lowercased()
+        var state = GuardianResponse(code: 0)
+        state.canResume = true
+        state.controlRevision = revision
+        state.active = true
+        state.status = session + "|OPEN"
+        var requests: [GuardianRequest] = []
+        func exchange(_ request: GuardianRequest) -> GuardianResponse {
+            requests.append(request)
+            return request.operation == .state ? state : GuardianResponse(code: 0)
+        }
+        guard resume(uid: 501, exchange: exchange) == 77, requests.isEmpty,
+              resume(uid: 0, exchange: exchange) == 0, requests.count == 2,
+              requests[1].operation == .resume, requests[1].session == session,
+              requests[1].controlRevision == revision, requests[1].userInitiated == true else { return false }
+        requests = []; state.paused = true
+        guard resume(uid: 0, exchange: exchange) == 0, requests.count == 2,
+              requests[1].session != session,
+              requests[1].session.flatMap(UUID.init(uuidString:)) != nil else { return false }
+        requests = []; state.canResume = false
+        guard resume(uid: 0, exchange: exchange) == 82, requests.count == 1 else { return false }
+        requests = []; state.canResume = true; state.controlRevision = nil
+        guard resume(uid: 0, exchange: exchange) == 74, requests.count == 1 else { return false }
+        requests = []; state.code = 78
+        return resume(uid: 0, exchange: exchange) == 78 && requests.count == 1
+    }
+    #endif
+}
+
 enum GuardianClient {
     static func send(_ request: GuardianRequest, recovery: Bool = false) -> GuardianResponse {
         guard GuardianIdentity.currentProcessMatches(GuardianIdentity.application) else { return GuardianResponse(code: 78) }

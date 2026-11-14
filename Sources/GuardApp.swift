@@ -32,6 +32,9 @@ enum Launch {
             }
             exit(GuardianClient.send(GuardianRequest(.restore), recovery: true).code)
         }
+        if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--resume" {
+            exit(GuardianConsole.resume(uid: geteuid()) { GuardianClient.send($0) })
+        }
         #if GUARD_DIAGNOSTICS
         if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--preview" {
             do {
@@ -53,7 +56,8 @@ enum Launch {
 
     #if GUARD_DIAGNOSTICS
     @MainActor private static func selfTest() -> Bool {
-        guard GuardController.automaticIssueLifecycleSelfTest(), ShadowrocketStartup.selfTest() else { return false }
+        guard GuardController.automaticIssueLifecycleSelfTest(), ShadowrocketStartup.selfTest(),
+              GuardianConsole.selfTest() else { return false }
         guard AutomaticSetupIssue(ShadowrocketProfile.Failure.unavailable) == .profileAccess,
               AutomaticSetupIssue(ShadowrocketProfile.Failure.bootstrap) == .numericBootstrap,
               AutomaticSetupIssue(ShadowrocketProfile.Failure.routing) == .routingMode,

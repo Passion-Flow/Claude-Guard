@@ -1,30 +1,6 @@
 import Foundation
 import SwiftUI
 
-private final class ServiceTraceDelegate: NSObject, URLSessionTaskDelegate {
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        authentication(challenge, completion: completionHandler)
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        authentication(challenge, completion: completionHandler)
-    }
-
-    private func authentication(_ challenge: URLAuthenticationChallenge,
-                                completion: (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        completion(challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust
-                   ? .performDefaultHandling : .cancelAuthenticationChallenge, nil)
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask,
-                    willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(nil)
-    }
-}
-
 @MainActor final class ServiceDiagnostics: ObservableObject {
     enum Outcome: Equatable {
         case matched, different, unavailable
@@ -40,7 +16,7 @@ private final class ServiceTraceDelegate: NSObject, URLSessionTaskDelegate {
         let id: String
         let outcome: Outcome
     }
-    static let hosts = ["claude.ai", "api.anthropic.com"]
+    static let hosts = ServiceDiagnosticTransport.hosts
     @Published private(set) var checking = false
     @Published private(set) var results: [Result] = []
     @Published private(set) var checkedAt: Date?
@@ -108,24 +84,14 @@ private final class ServiceTraceDelegate: NSObject, URLSessionTaskDelegate {
     }
 
     private func probe(host: String, expected: String) async -> Outcome {
-        guard Self.hosts.contains(host), let url = URL(string: "https://" + host + "/cdn-cgi/trace") else { return .unavailable }
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpShouldSetCookies = false
-        configuration.httpCookieStorage = nil
-        configuration.urlCredentialStorage = nil
-        configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 5
-        configuration.timeoutIntervalForResource = 5
-        configuration.httpMaximumConnectionsPerHost = 1
+        guard let request = ServiceDiagnosticTransport.request(host: host) else { return .unavailable }
+        let configuration = ServiceDiagnosticTransport.configuration()
         let session = URLSession(configuration: configuration, delegate: ServiceTraceDelegate(), delegateQueue: nil)
         activeSession = session
         defer {
             session.invalidateAndCancel()
             if activeSession === session { activeSession = nil }
         }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
-        request.httpShouldHandleCookies = false
-        request.setValue("text/plain", forHTTPHeaderField: "Accept")
         do {
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200,

@@ -17,6 +17,9 @@ probe_primary=1.1.1.1
 probe_backup=1.0.0.1
 identity_lease_seconds=12
 health_interval_seconds=2
+# OPEN renewal can consume two four-second HTTPS budgets. Reserve local work
+# as well; start it only immediately after an accepted identity observation.
+risk_review_budget_seconds=10
 stability_seconds=15
 stability_samples=6
 stability_tick=3
@@ -49,6 +52,7 @@ health_primary_pid=
 health_backup_pid=
 health_independent_pid=
 health_cache_file=$directory/independent-address
+health_host=checkip.amazonaws.com
 probe_region_source=unavailable
 expected=
 risk_key=
@@ -256,6 +260,17 @@ publish() {
   last_reason=$3
   now=$(/bin/date +%s)
   tmp=$(/usr/bin/mktemp "$directory/status.XXXXXX")
+  # Root-only observation data is distinct from the publication heartbeat.
+  # Observers use this atomic record, not status age, to check the exit lease.
+  context_bound=0
+  if [ -n "$evidence_context" ] &&
+     [ "$evidence_context" = "$session|$vpn_service|$iface|$endpoint_key|$expected|${bound_path:-}" ]; then
+    context_bound=1
+  fi
+  printf '1|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+    "$session" "${4:-$1}" "$now" "${last_verified:-0}" "$risk_checked_at" \
+    "$iface" "$vpn_service" "$endpoint_key" "$expected" "$context_bound" > "$tmp.proof"
+  /bin/mv -f "$tmp.proof" "$directory/evidence"
   printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$session" "$1" "$now" "$iface" "$expected" "$2" "$3" "$expires" "$mode" "$trial_verified" "$vpn_service" "$endpoint_key" "$policy_id" "$risk_checked_at" > "$tmp"
   /bin/chmod 0600 "$tmp"
   /bin/mv -f "$tmp" "$status_file"
@@ -449,14 +464,32 @@ identity_fresh() {
     [ "$evidence_context" = "$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path" ]
 }
 
+remember_identity_observation() {
+  # All proof writers share this monotonic update. A round may finish with an
+  # older peer response after a newer streamed result was already accepted.
+  # Rebinding requires an explicit reset by the state transition first.
+  observation_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
+  [ "$probe_observed_at" -gt 0 ] && [ "$probe_observed_at" -le "$(/bin/date +%s)" ] || return 1
+  if [ "$last_verified" -gt 0 ] && [ "$evidence_context" != "$observation_context" ]; then return 1; fi
+  if [ "$probe_observed_at" -gt "$last_verified" ]; then last_verified=$probe_observed_at; fi
+  evidence_context=$observation_context
+}
+
 guard_sleep() {
   # The health check can wait. A damaged filter cannot.
   guard_began=$(/bin/date +%s)
   guard_until=$((guard_began + $1))
+  guard_interval=0
   if [ "$phase" = OPEN ]; then
+    guard_interval=$health_interval_seconds
+  elif [ "$phase" = LOCKED ] && [ "$last_verified" -gt 0 ] && [ "$consecutive" -gt 0 ]; then
+    guard_interval=$stability_tick
+  fi
+  if [ "$guard_interval" -gt 0 ]; then
     # Count from the actual verified response, including filter and readback
-    # work already spent since it. Repeated sleeps do not define that interval.
-    guard_next_probe=$((last_verified + health_interval_seconds))
+    # work already spent since it. This also prevents a slow peer from adding
+    # another full dwell interval while the candidate remains LOCKED.
+    guard_next_probe=$((last_verified + guard_interval))
     if [ "$guard_next_probe" -lt "$guard_until" ]; then guard_until=$guard_next_probe; fi
   fi
   while :; do
@@ -513,9 +546,31 @@ discard_probe() {
     [0-9][0-9][0-9]) printf '%s\n' "$http_status" > "$directory/transport-status";;
   esac
   if [ -n "$probe_file" ]; then
-    /bin/rm -f -- "$probe_file" "$probe_file.clean"
+    /bin/rm -f -- "$probe_file" "$probe_file.clean" "$probe_file.error"
     probe_file=
   fi
+}
+
+record_transport_category() {
+  # Only fixed categories survive this request. Curl error text can contain a
+  # URL, address or credential and must never enter status, events or reports.
+  transport_category=other
+  case "$transport_exit" in
+    0) transport_category=none;;
+    6) transport_category=resolution;;
+    7) transport_category=connect;;
+    22) transport_category=http;;
+    28) transport_category=timeout;;
+    35)
+      transport_category=tls-handshake
+      if /usr/bin/grep -Eq 'SSL_ERROR_SYSCALL|SSL_ERROR_ZERO_RETURN|Connection reset|unexpected eof|closed' "$probe_file.error"; then
+        transport_category=tls-peer-closed
+      fi;;
+    51|60|77|83|90|91) transport_category=tls-verification;;
+    52) transport_category=empty-response;;
+    55|56) transport_category=transfer;;
+  esac
+  printf '%s\n' "$transport_category" > "$directory/transport-category"
 }
 
 tunnel_response() {
@@ -525,20 +580,22 @@ tunnel_response() {
     response_received_at=0
     transport_exit=0
     probe_file=$(/usr/bin/mktemp "$directory/probe.XXXXXX") || return 1
-    if http_status=$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/var/empty \
+    if http_status=$(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/var/empty LC_ALL=C \
       /usr/bin/curl -q -4 --noproxy '*' --interface "if!$iface" --proto '=https' --tlsv1.2 \
         --connect-timeout "$request_timeout" --max-time "$request_timeout" --max-filesize 16384 --output "$probe_file" --write-out '%{http_code}' \
-        -fsS "$@" 2>/dev/null); then
+        -fsS "$@" 2> "$probe_file.error"); then
       # Retain the actual completed transport time, before body validation and
       # cleanup. Local parsing work must never make an old response look new.
       response_received_at=$(/bin/date +%s)
     else
       transport_exit=$?
       printf '%s\n' "$transport_exit" > "$directory/transport-exit"
+      record_transport_category
       discard_probe
       return 1
     fi
     printf '%s\n' "$transport_exit" > "$directory/transport-exit"
+    record_transport_category
     if [ "$http_status" != 200 ]; then discard_probe; return 1; fi
     probe_size=$(/usr/bin/stat -f '%z' "$probe_file") || { discard_probe; return 1; }
     if [ "$probe_size" -gt 16384 ]; then discard_probe; return 1; fi
@@ -565,7 +622,7 @@ parse_exit_response() {
 }
 
 cleanup_health_round() {
-  # Both HTTPS children have a four-second total request deadline. Drain them
+  # Health requests have bounded total deadlines. Drain every child
   # before deleting their private files; a signal cannot leave overlapping rounds.
   if [ -n "$health_primary_pid" ]; then wait "$health_primary_pid" 2>/dev/null || true; fi
   if [ -n "$health_backup_pid" ]; then wait "$health_backup_pid" 2>/dev/null || true; fi
@@ -577,6 +634,9 @@ cleanup_health_round() {
 }
 
 select_health_reply() {
+  probe_used=
+  probe_observed_at=0
+  probe_region_source=unavailable
   chosen_observed=
   chosen_region=
   chosen_probe=
@@ -636,6 +696,56 @@ select_health_reply() {
   return 1
 }
 
+refresh_health_reply() {
+  health_mask=
+  for health_label in primary backup independent; do
+    if [ -s "$health_round/$health_label.stamp" ] &&
+       IFS= read -r health_mask_stamp < "$health_round/$health_label.stamp"; then
+      health_mask="${health_mask}${health_label}:${health_mask_stamp};"
+    fi
+  done
+  health_changed=0
+  if [ "$health_mask" != "$health_seen_mask" ]; then
+    health_seen_mask=$health_mask
+    health_changed=1
+    health_has_reply=0
+    if select_health_reply; then health_has_reply=1; fi
+  fi
+}
+
+identity_continuity_fresh() {
+  # While still OPEN, a validated on-time observation can continue the chain
+  # even if local processing crosses the previous deadline. Both the gap from
+  # the old observation and the new observation's current age remain bounded.
+  # This predicate never changes state or revives a sealed authorization.
+  [ "$last_verified" -gt 0 ] && [ "$1" -ge "$last_verified" ] &&
+    [ "$evidence_context" = "$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path" ] || return 1
+  if [ "$health_has_reply" = 1 ]; then
+    [ "$probe_observed_at" -le "$1" ] || return 1
+    if [ "$probe_observed_at" -gt "$last_verified" ]; then
+      [ $((probe_observed_at - last_verified)) -le "$identity_lease_seconds" ] &&
+        [ $(($1 - probe_observed_at)) -le "$identity_lease_seconds" ]
+      return
+    fi
+  fi
+  identity_fresh "$1"
+}
+
+pending_evidence_valid() {
+  # Negative evidence always wins, including evidence arriving during a slow
+  # local boundary check. No heartbeat or empty round extends either lease.
+  if [ "$health_has_reply" = 1 ] &&
+     { [ "$observed" != "$expected" ] ||
+       { [ -z "$risk_key" ] && [ "$observed_region" != "$risk_region" ]; }; }; then
+    seal_pending_health LOCKED exit-mismatch
+    return 1
+  fi
+  if ! identity_continuity_fresh "$1" || ! risk_fresh "$1"; then
+    seal_pending_health LOCKED evidence-expired
+    return 1
+  fi
+}
+
 seal_pending_health() {
   health_sealed=1
   health_seal_reason=$2
@@ -656,22 +766,12 @@ seal_pending_health() {
 
 guard_pending_health() {
   [ "${phase:-}" = OPEN ] && [ "$health_sealed" = 0 ] || return 0
+  refresh_health_reply
   health_now=$(/bin/date +%s)
-  # A negative completed reply wins immediately, even if another child has
-  # already supplied matching evidence during this round.
-  if [ "$health_has_reply" = 1 ] &&
-     { [ "$observed" != "$expected" ] ||
-       { [ -z "$risk_key" ] && [ "$observed_region" != "$risk_region" ]; }; }; then
-    seal_pending_health LOCKED exit-mismatch
-    return 0
-  fi
-  if ! identity_fresh "$health_now" || ! risk_fresh "$health_now"; then
-    seal_pending_health LOCKED evidence-expired
-    return 0
-  fi
+  pending_evidence_valid "$health_now" || return 0
   # Inspect changed evidence immediately and the packet/path boundary at most
   # once per wall-clock second while requests remain pending.
-  if [ "$health_changed" = 0 ] && [ "$health_checked_at" = "$health_now" ]; then return 0; fi
+  if [ "${1:-0}" = 0 ] && [ "$health_changed" = 0 ] && [ "$health_checked_at" = "$health_now" ]; then return 0; fi
   health_checked_at=$health_now
   if ! rules_intact; then
     health_sealed=1
@@ -689,19 +789,39 @@ guard_pending_health() {
     seal_pending_health SEALED route-changed
     return 0
   fi
+  # Re-read completed observations after local work; do not make an expiry
+  # decision from the reply set sampled before that work began.
+  refresh_health_reply
   health_now=$(/bin/date +%s)
-  if ! identity_fresh "$health_now" || ! risk_fresh "$health_now"; then
-    seal_pending_health LOCKED evidence-expired
-    return 0
-  fi
+  pending_evidence_valid "$health_now" || return 0
   if [ "$health_has_reply" = 1 ] && [ "$probe_observed_at" -gt "$last_verified" ] &&
      [ "$probe_observed_at" -le "$health_now" ]; then
-    # Adopt only a validated response processed while the previous lease and
-    # exact context still hold. A late reply can never revive expired OPEN.
-    last_verified=$probe_observed_at
+    # The observation chain, current risk and exact boundary all passed.
+    # A response completed after the previous deadline cannot get here.
+    remember_identity_observation || { seal_pending_health LOCKED evidence-expired; return 0; }
     health_reason=probe-ok
     case "$probe_used" in "$probe_backup") health_reason=probe-backup;; independent) health_reason=probe-independent;; esac
     publish OPEN "$observed" "$health_reason"
+    # A slow peer must not postpone proactive renewal until the newly accepted
+    # proof has aged out of its operation budget. Use the streamed observation
+    # while it is fresh, retaining all pending peer replies for later rejection.
+    if [ "$probe_region_source" = observed ] && risk_review_due "$health_now" &&
+       [ $((health_now - risk_attempt_at)) -ge "$risk_retry_seconds" ]; then
+      desired=OPEN
+      reason=$health_reason
+      if ! renew_risk_evidence; then
+        seal_pending_health SEALED risk-invalid-state
+        return 0
+      fi
+      if [ "$desired" != OPEN ]; then
+        seal_pending_health "$desired" "$reason"
+        return 0
+      fi
+      refresh_health_reply
+      health_now=$(/bin/date +%s)
+      pending_evidence_valid "$health_now" || return 0
+      publish OPEN "$observed" "$reason"
+    fi
   else
     publish "$last_state" "$last_observed" "$last_reason"
   fi
@@ -729,11 +849,93 @@ record_health_round() {
     done
     printf '\n'
   } > "$directory/health-events.tmp" && /bin/mv -f "$directory/health-events.tmp" "$directory/health-events"
+  {
+    if [ -f "$directory/transport-events" ]; then /usr/bin/tail -n 59 "$directory/transport-events"; fi
+    printf '%s|%s' "$health_started_at" "$health_ended_at"
+    for health_label in primary backup independent; do
+      category=$(/bin/cat "$health_round/$health_label/transport-category" 2>/dev/null) || category=unavailable
+      case "$category" in none|resolution|connect|http|timeout|tls-handshake|tls-peer-closed|tls-verification|empty-response|transfer|other) :;; *) category=unavailable;; esac
+      printf '|%s' "$category"
+    done
+    printf '\n'
+  } > "$directory/transport-events.tmp" && /bin/mv -f "$directory/transport-events.tmp" "$directory/transport-events"
 }
 
 publish_health_stamp() {
   printf '%s\n' "$response_received_at" > "$health_round/$1.stamp.tmp" &&
     /bin/mv -f "$health_round/$1.stamp.tmp" "$health_round/$1.stamp"
+}
+
+start_health_client() {
+  health_client_attempt_at=$(/bin/date +%s)
+  (
+    trap - EXIT HUP INT TERM
+    directory="$health_round/$1"
+    case "$1" in
+      primary|backup)
+        case "$1" in primary) health_address=$probe_primary;; backup) health_address=$probe_backup;; esac
+        if tunnel_response "$health_request_budget" "https://$health_address/cdn-cgi/trace" > "$health_round/$1.trace"; then
+          publish_health_stamp "$1"
+        fi
+        ;;
+      independent)
+        if [ "${phase:-}" = OPEN ] && risk_fresh "$(/bin/date +%s)"; then
+          context=$(independent_health_address) || exit 0
+          address=${context%|*}; budget=${context##*|}
+          route_via_tunnel "$address" || exit 0
+          if tunnel_response "$budget" --resolve "$health_host:443:$address" \
+              "https://$health_host" > "$health_round/independent.trace"; then
+            publish_health_stamp independent
+          fi
+        elif [ "${phase:-}" = LOCKED ] && [ ! -f "$health_cache_file" ]; then
+          independent_health_address >/dev/null || true
+        fi
+        ;;
+    esac
+  ) &
+  health_client_pid=$!
+  case "$1" in
+    primary) health_primary_pid=$health_client_pid; health_primary_attempt_at=$health_client_attempt_at;;
+    backup) health_backup_pid=$health_client_pid; health_backup_attempt_at=$health_client_attempt_at;;
+    independent) health_independent_pid=$health_client_pid; health_independent_attempt_at=$health_client_attempt_at;;
+  esac
+}
+
+reschedule_completed_health() {
+  # Reap owned request slots even when another retry is not permitted. A
+  # completion is independent of whether some other provider is still running.
+  # Keep one request per provider and retain the original launch window and
+  # minimum spacing. Never discard a pending or completed rejecting response.
+  for health_reschedule_label in primary backup independent; do
+    case "$health_reschedule_label" in
+      primary) health_completed_pid=$health_primary_pid; health_attempt_at=$health_primary_attempt_at;;
+      backup) health_completed_pid=$health_backup_pid; health_attempt_at=$health_backup_attempt_at;;
+      independent) health_completed_pid=$health_independent_pid; health_attempt_at=$health_independent_attempt_at;;
+    esac
+    if [ -n "$health_completed_pid" ]; then
+      if kill -0 "$health_completed_pid" 2>/dev/null; then continue; fi
+      wait "$health_completed_pid" || true
+      case "$health_reschedule_label" in
+        primary) health_primary_pid=;;
+        backup) health_backup_pid=;;
+        independent) health_independent_pid=;;
+      esac
+      # Join the writer before consuming its final result. In particular, a
+      # late rejection must be handled before any retry clears the old files.
+      guard_pending_health
+    fi
+    # Do not return here: other finished slots still need to be reaped after a
+    # seal, a fresh success, or the end of the launch window.
+    [ "${phase:-}" = OPEN ] && [ "$health_sealed" = 0 ] || continue
+    [ "$health_now" -lt "$health_refresh_until" ] || continue
+    if [ $((health_now - last_verified)) -ge "$health_interval_seconds" ] &&
+       [ $((health_now - health_attempt_at)) -ge "$health_interval_seconds" ]; then
+      /bin/rm -f "$health_round/$health_reschedule_label.stamp" "$health_round/$health_reschedule_label.trace" \
+        "$health_round/$health_reschedule_label/transport-status" "$health_round/$health_reschedule_label/transport-exit" \
+        "$health_round/$health_reschedule_label/transport-category"
+      start_health_client "$health_reschedule_label"
+    fi
+  done
 }
 
 sample_exit() {
@@ -747,68 +949,34 @@ sample_exit() {
   health_checked_at=0
   health_seen_mask=
   health_has_reply=0
+  health_request_budget=4
+  if [ "${phase:-}" = OPEN ]; then health_request_budget=8; fi
+  health_refresh_until=$((health_started_at + health_request_budget))
   health_round=$(/usr/bin/mktemp -d "$directory/health.XXXXXX") || return 1
   /bin/mkdir -m 0700 "$health_round/primary" "$health_round/backup" "$health_round/independent" || { cleanup_health_round; return 1; }
-  # Concurrent requests keep their original four-second transport budgets.
-  (
-    trap - EXIT HUP INT TERM
-    directory="$health_round/primary"
-    if tunnel_response 4 "https://$probe_primary/cdn-cgi/trace" > "$health_round/primary.trace"; then
-      publish_health_stamp primary
-    fi
-  ) &
-  health_primary_pid=$!
-  (
-    trap - EXIT HUP INT TERM
-    directory="$health_round/backup"
-    if tunnel_response 4 "https://$probe_backup/cdn-cgi/trace" > "$health_round/backup.trace"; then
-      publish_health_stamp backup
-    fi
-  ) &
-  health_backup_pid=$!
-  (
-    trap - EXIT HUP INT TERM
-    directory="$health_round/independent"
-    if [ "${phase:-}" = OPEN ] && risk_fresh "$(/bin/date +%s)"; then
-      context=$(independent_health_address) || exit 0
-      address=${context%|*}; budget=${context##*|}
-      route_via_tunnel "$address" || exit 0
-      if tunnel_response "$budget" --resolve "api.ipify.org:443:$address" \
-          'https://api.ipify.org' > "$health_round/independent.trace"; then
-        publish_health_stamp independent
-      fi
-    elif [ "${phase:-}" = LOCKED ] && [ ! -f "$health_cache_file" ]; then
-      independent_health_address >/dev/null || true
-    fi
-  ) &
-  health_independent_pid=$!
-  while kill -0 "$health_primary_pid" 2>/dev/null ||
-        kill -0 "$health_backup_pid" 2>/dev/null ||
-        kill -0 "$health_independent_pid" 2>/dev/null; do
-    health_mask=
-    for health_label in primary backup independent; do
-      if [ -s "$health_round/$health_label.stamp" ]; then health_mask="${health_mask}${health_label}"; fi
-    done
-    health_changed=0
-    if [ "$health_mask" != "$health_seen_mask" ]; then
-      health_seen_mask=$health_mask
-      health_changed=1
-      health_has_reply=0
-      if select_health_reply; then health_has_reply=1; fi
-    fi
+  # Already OPEN continuity allows a slower TLS response to complete, while
+  # guard_pending_health still enforces the original twelve-second lease.
+  # Initial/recovery admission retains its four-second request budget.
+  start_health_client primary
+  start_health_client backup
+  start_health_client independent
+  while :; do
     guard_pending_health
+    reschedule_completed_health
+    # The completion pass owns these slots. A second liveness poll here would
+    # race a last child exiting after that pass and skip its retry decision.
+    [ -n "$health_primary_pid$health_backup_pid$health_independent_pid" ] || break
     /bin/sleep .2
   done
-  wait "$health_primary_pid" || true
-  wait "$health_backup_pid" || true
-  wait "$health_independent_pid" || true
+  if [ -n "$health_primary_pid" ]; then wait "$health_primary_pid" || true; fi
+  if [ -n "$health_backup_pid" ]; then wait "$health_backup_pid" || true; fi
+  if [ -n "$health_independent_pid" ]; then wait "$health_independent_pid" || true; fi
   health_primary_pid=
   health_backup_pid=
   health_independent_pid=
   health_has_reply=0
   if select_health_reply; then health_has_reply=1; fi
-  health_changed=1
-  guard_pending_health
+  guard_pending_health 1
   record_health_round || true
   cleanup_health_round
   [ "$health_has_reply" = 1 ]
@@ -848,32 +1016,65 @@ independent_health_address() {
   health_now=$(/bin/date +%s)
   if [ -f "$health_cache_file" ]; then
     record=$(/bin/cat "$health_cache_file") || return 1
-    IFS='|' read -r address cached_at extra <<EOF
+    IFS='|' read -r address cached_at cached_ttl cached_host extra <<EOF
 $record
 EOF
     case "$cached_at" in ''|*[!0-9]*) cached_at=0;; esac
-    if [ -z "$extra" ] && [ "$record" = "$address|$cached_at" ] &&
+    case "$cached_ttl" in ''|*[!0-9]*) cached_ttl=0;; esac
+    if [ -z "$extra" ] && [ "$cached_host" = "$health_host" ] &&
+       [ "$record" = "$address|$cached_at|$cached_ttl|$cached_host" ] &&
        [ "${#cached_at}" -le 12 ] && [ "$cached_at" -gt 0 ] && [ "$health_now" -ge "$cached_at" ] &&
-       [ $((health_now - cached_at)) -lt 3600 ] && public_risk_address "$address" && [ "$address" != "$peer" ]; then
-      printf '%s|4' "$address"; return
+       [ "${#cached_ttl}" -le 3 ] && [ "$cached_ttl" -gt 0 ] && [ "$cached_ttl" -le 600 ] &&
+       [ $((health_now - cached_at)) -lt "$cached_ttl" ] && public_risk_address "$address" && [ "$address" != "$peer" ]; then
+      printf '%s|%s' "$address" "${health_request_budget:-4}"; return
     fi
   fi
-  # DNS stays HTTPS inside the selected tunnel. Split the original transport
-  # budget between a new resolution and the subsequent address request.
-  dns=$(tunnel_response 2 --resolve "cloudflare-dns.com:443:$probe_primary" \
-    -H 'accept: application/dns-json' 'https://cloudflare-dns.com/dns-query?name=api.ipify.org&type=A') || return 1
+  # OPEN continuity must not share the trace operator's DNS dependency. Spend
+  # at most half of its existing request window on a fresh encrypted lookup,
+  # then give the target only the remaining time. A slow lookup must not erase
+  # a reachable provider, add a new request window or extend a DNS/identity
+  # lifetime. Never fall back to the system resolver or physical DNS.
+  if [ "${phase:-}" = OPEN ]; then
+    [ "$peer" != 8.8.8.8 ] && route_via_tunnel 8.8.8.8 || return 1
+    health_dns_budget=$((${health_request_budget:-4} / 2))
+    [ "$health_dns_budget" -ge 1 ] && [ "$health_dns_budget" -le 4 ] || return 1
+    dns=$(tunnel_response "$health_dns_budget" --resolve 'dns.google:443:8.8.8.8' \
+      "https://dns.google/resolve?name=$health_host&type=A&edns_client_subnet=0.0.0.0/0") || return 1
+  else
+    # Initial admission may only warm the cache through its existing narrow
+    # probe exception. This is not independent-provider admission permission.
+    dns=$(tunnel_response 2 --resolve "cloudflare-dns.com:443:$probe_primary" \
+      -H 'accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=$health_host&type=A") || return 1
+  fi
   [ "$(json_field "$dns" Status integer)" = 0 ] && [ "$(json_field "$dns" TC bool)" = false ] &&
     [ "$(json_field "$dns" Question.0.type integer)" = 1 ] || return 1
   question=$(json_field "$dns" Question.0.name string) || return 1
-  case "$question" in api.ipify.org|api.ipify.org.) :;; *) return 1;; esac
+  case "$question" in "$health_host"|"$health_host.") :;; *) return 1;; esac
   for answer in 0 1 2 3 4 5 6 7; do
     type=$(json_field "$dns" "Answer.$answer.type" integer) || return 1
     [ "$type" = 1 ] || continue
     address=$(json_field "$dns" "Answer.$answer.data" string) || return 1
+    ttl=$(json_field "$dns" "Answer.$answer.TTL" integer) || return 1
+    case "$ttl" in ''|*[!0-9]*) return 1;; esac
+    [ "${#ttl}" -le 10 ] || return 1
+    if [ "$ttl" -gt 600 ]; then ttl=600; fi
     if public_risk_address "$address" && [ "$address" != "$peer" ]; then
-      printf '%s|%s\n' "$address" "$health_now" > "$health_cache_file.tmp" &&
+      # Bind cached resolution to its service and authoritative TTL. Old
+      # two-field entries cannot redirect a newly selected provider.
+      printf '%s|%s|%s|%s\n' "$address" "$health_now" "$ttl" "$health_host" > "$health_cache_file.tmp" &&
         /bin/mv -f "$health_cache_file.tmp" "$health_cache_file" || return 1
-      printf '%s|2' "$address"; return
+      if [ "${phase:-}" = OPEN ]; then
+        health_dns_finished=$(/bin/date +%s) || return 1
+        [ "$health_dns_finished" -ge "$health_now" ] || return 1
+        # Reserve one second for the integer clock boundary and local work.
+        # Even fast DNS must not give the target a second full request window.
+        health_remaining_budget=$((${health_request_budget:-4} - health_dns_finished + health_now - 1))
+        [ "$health_remaining_budget" -gt 0 ] || return 1
+        printf '%s|%s' "$address" "$health_remaining_budget"
+      else
+        printf '%s|%s' "$address" "$((${health_request_budget:-4} - 2))"
+      fi
+      return
     fi
   done
   return 1
@@ -948,6 +1149,34 @@ EOF
 risk_cache_response() {
   { printf '%s|%s|%s\n' "$risk_now" "$observed" "$risk_region"; printf '%s' "$response"; } > "$directory/risk-cache.tmp" &&
     /bin/mv -f "$directory/risk-cache.tmp" "$directory/risk-cache"
+}
+
+risk_transfer_incomplete() {
+  # HTTP 200 is only a response status. A truncated or timed-out transfer is
+  # not a completed provider verdict and cannot replace existing evidence.
+  # The original risk/identity deadlines still apply. Unknown errors, body
+  # validation failures and size-limit violations remain fail-closed.
+  risk_transfer_exit=$(/bin/cat "$directory/transport-exit" 2>/dev/null) || return 1
+  case "$risk_transfer_exit" in 16|18|28|52|55|56|92) return 0;; *) return 1;; esac
+}
+
+record_risk_transport() {
+  # Bounded fixed metadata distinguishes incomplete transport from a complete
+  # invalid response. Never retain response bodies, URLs, addresses or keys.
+  risk_log_http=$(/bin/cat "$directory/transport-status" 2>/dev/null || true)
+  case "$risk_log_http" in [0-9][0-9][0-9]) :;; *) risk_log_http=unknown;; esac
+  risk_log_exit=$(/bin/cat "$directory/transport-exit" 2>/dev/null || true)
+  case "$risk_log_exit" in ''|*[!0-9]*) risk_log_exit=unknown;; esac
+  if [ "${#risk_log_exit}" -gt 3 ]; then risk_log_exit=unknown; fi
+  risk_log_phase=$phase
+  case "$risk_log_phase" in OPEN|LOCKED) :;; *) risk_log_phase=unknown;; esac
+  risk_log_result=$1
+  case "$risk_log_result" in received|failed) :;; *) return 0;; esac
+  risk_log_ended=$(/bin/date +%s) || return 0
+  printf '%s|%s|%s|%s|%s|%s\n' "$risk_now" "$risk_log_ended" "$risk_log_phase" \
+    "$risk_log_http" "$risk_log_exit" "$risk_log_result" >> "$directory/risk-transports" || return 0
+  /usr/bin/tail -n 60 "$directory/risk-transports" > "$directory/risk-transports.tmp" &&
+    /bin/mv -f "$directory/risk-transports.tmp" "$directory/risk-transports" || true
 }
 
 review_exit_risk() {
@@ -1028,13 +1257,15 @@ EOF
     if [ -z "$risk_key" ]; then
       if ! risk_charge_connection || ! risk_write_attempt 300; then risk_budget_failed=1; break; fi
     fi
-    /bin/rm -f "$directory/transport-status"
+    /bin/rm -f "$directory/transport-status" "$directory/transport-exit" "$directory/transport-category"
     if [ "$phase" = LOCKED ]; then publish LOCKED "-" risk-review; fi
     if body=$(printf '%s\n' "$request" | tunnel_response 4 --resolve "$risk_host:443:$risk_address" --config -); then
+      record_risk_transport received
       response=$body
       risk_received=1
       break
     fi
+    record_risk_transport failed
     risk_http=$(/bin/cat "$directory/transport-status" 2>/dev/null || printf '000')
     [ "$phase" = LOCKED ] && [ "$risk_http" = 000 ] && [ "$risk_connection" -lt 3 ] || break
     /bin/sleep 1
@@ -1045,7 +1276,12 @@ EOF
   fi
   [ "$risk_budget_failed" = 0 ] || return 2
   if [ "$risk_received" = 0 ]; then
-    if [ "$risk_http" = 200 ]; then
+    if [ "$risk_http" = 200 ] && risk_transfer_incomplete; then
+      if [ -z "$risk_key" ] && [ "$phase" = OPEN ]; then
+        /bin/rm -f "$directory/risk-last-attempt"
+      fi
+      risk_issue=risk-provider-unavailable
+    elif [ "$risk_http" = 200 ]; then
       /bin/rm -f "$directory/risk-cache"
       risk_issue=risk-invalid-response
     elif [ "$risk_http" = 429 ]; then
@@ -1079,6 +1315,21 @@ EOF
 }
 
 renew_risk_evidence() {
+  if [ "$phase" = OPEN ]; then
+    renewal_start=$(/bin/date +%s)
+    if ! identity_fresh "$renewal_start"; then
+      reset_stability
+      desired=LOCKED
+      reason=evidence-expired
+      return 0
+    fi
+    if [ $((renewal_start - last_verified + risk_review_budget_seconds)) -gt "$identity_lease_seconds" ]; then
+      # Keep the original risk timestamp. The next streamed identity result
+      # gets another scheduling opportunity; waiting never extends expiry.
+      reason=risk-refresh-pending
+      return 0
+    fi
+  fi
   if [ "$probe_region_source" = accepted-cache ]; then
     if [ "$phase" = OPEN ] && risk_fresh "$(/bin/date +%s)"; then
       reason=risk-refresh-pending
@@ -1152,8 +1403,11 @@ renew_risk_evidence() {
         reason=settling
       fi
       last_probe=$(/bin/date +%s)
-      last_verified=$probe_observed_at
-      evidence_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
+      if ! remember_identity_observation; then
+        reset_stability
+        desired=LOCKED
+        reason=evidence-expired
+      fi
     fi
   fi
 }
@@ -1641,8 +1895,11 @@ PLIST
             retry_delay=3
           fi
         fi
-        last_verified=$probe_observed_at
-        evidence_context="$session|$vpn_service|$iface|$endpoint_key|$expected|$bound_path"
+        if ! remember_identity_observation; then
+          reset_stability
+          desired=LOCKED
+          reason=evidence-expired
+        fi
       elif [ "$probe_ok" = 1 ]; then
         recovery_link_lost=0
         recovery_probe_misses=0
@@ -1667,9 +1924,10 @@ PLIST
             continue
           fi
         fi
-        if [ "$phase" = OPEN ] && [ "$missed_round" = 0 ] && identity_fresh "$last_probe" && risk_fresh "$last_probe"; then
-          # One empty round is tolerated only on the same verified tunnel and visible route.
-          missed_round=1
+        if [ "$phase" = OPEN ] && identity_fresh "$last_probe" && risk_fresh "$last_probe"; then
+          # Empty rounds and heartbeats never renew the previous proof. The
+          # absolute lease, rather than a count of fast failures, bounds grace.
+          missed_round=$((missed_round + 1))
           publish OPEN "-" probe-retry
           /bin/sleep 1
           continue
@@ -1698,6 +1956,13 @@ PLIST
         fi
       fi
       if [ "$desired" != "$phase" ]; then
+        if [ "$desired" = OPEN ]; then
+          # Prepare the complete authorization before the kernel transaction.
+          # Keep the UI restrictive until the rule write/readback commits.
+          # The native supervisor expires ADMITTING just like OPEN, including
+          # a worker frozen between the rule commit and the final publication.
+          publish LOCKED "$observed" revalidating ADMITTING
+        fi
         if ! load_phase "$desired"; then
           drift=1
           publish DRIFT "-" pf-load
@@ -1715,7 +1980,7 @@ PLIST
         # The kernel still blocks direct traffic between health checks.
         guard_sleep 5
       elif [ "$reason" = settling ]; then
-        /bin/sleep "$stability_tick"
+        guard_sleep "$stability_tick"
       elif [ "$reason" = probe-failed ]; then
         next_backoff
         guard_sleep "$backoff"

@@ -1,10 +1,10 @@
-# Claude Guard 0.4 private installation
+# Claude Guard 1.0 private installation
 
 Requires macOS 13 or later. One universal native application supports Apple Silicon and Intel. End users do not need Node, Python, a developer account or terminal commands.
 
 ## Install and use
 
-1. Extract the complete archive and double-click **Claude-Guard-Mac-0.4.0-private.pkg**. Authorize the installer with the macOS administrator prompt.
+1. Extract the complete archive and double-click **Claude-Guard-Mac-1.0.0-private.pkg**. Authorize the installer with the macOS administrator prompt.
 2. If Gatekeeper blocks this private, ad-hoc-signed build, use the per-file **Open Anyway** action for the reviewed installer. Do not disable Gatekeeper or SIP. [Apple instructions](https://support.apple.com/en-us/102445)
 3. Claude Guard starts in the login session. Connect the already configured dedicated Shadowrocket profile with a numeric IPv4 server address and Global Routing set to Proxy. Allow a macOS app-data privacy prompt if it appears. The dashboard detects supported profile metadata, the signed provider's live endpoint, the tunnel and its observed exit. There are no required node, port, tunnel or API-key fields.
 4. Detection enables persistent enforcement automatically. Ordinary applications are released only after six exit observations spanning at least 15 seconds and accepted risk evidence. Missing configuration, unsupported metadata or a disconnected VPN before first activation means **protection is not yet active**; the dashboard states this explicitly.
@@ -28,11 +28,15 @@ The default keyless policy combines the tunnel-bound trace country with document
 
 Accepted evidence has an original one-hour lifetime. While OPEN, Guard requests new evidence at forty-five minutes. A transient DNS, transport, quota or local-budget failure may retain that original evidence only until its existing expiry. A fresh rejection overrides it immediately and replaces the old cache; invalid evidence revokes it. Worker restart cannot extend the timestamp or resurrect a rejected clean response. A reconnect may reuse unexpired original facts only after fresh tunnel identity and stability checks. Risk responses never renew exit identity.
 
-Attempts are spaced across worker restarts: at least one minute after a DNS or OPEN connection-only failure, five minutes after other HTTP failures and fifteen minutes after a quota response or rejection. Only an already-locked admission batch may retry a connection without HTTP, at most three connections, each charged to the daily ceiling. OPEN renewal makes one connection attempt. Each risk/DNS connection retains a four-second total deadline including TLS. Missing or expired evidence, unsupported classifications and exhausted allowance keep ordinary traffic blocked. This external dependency cannot guarantee continuous availability or certify permanent address purity.
+Attempts are spaced across worker restarts: at least one minute after a DNS or OPEN connection-only failure, five minutes after other HTTP failures and fifteen minutes after a quota response or rejection. A known incomplete OPEN transfer after HTTP 200 also waits at least one minute and retains only the original unexpired evidence. It cannot refresh that evidence, authorize initial admission or override a complete rejecting or invalid response. Only an already-locked admission batch may retry a connection without HTTP, at most three connections, each charged to the daily ceiling. OPEN renewal makes one connection attempt. Each risk/DNS connection retains a four-second total deadline including TLS. Missing or expired evidence, unsupported classifications and exhausted allowance keep ordinary traffic blocked. This external dependency cannot guarantee continuous availability or certify permanent address purity.
 
 The supplied third-party websites remain explicit optional diagnostics. Net.Coffee has no established supported unattended API contract; the other site scores browser metadata rather than independent IP reputation. Neither can override a denied authoritative gate. Optional WebRTC tests run in the actual browser for at most five minutes and retain categories/counts without raw candidates or SDP. Optional anonymous service-path checks are credential-free, bounded, expire after five minutes and cannot authorize release.
 
 ## Pause, recovery, upgrade and uninstall
+
+See [network privacy](Privacy.md) for the complete outbound-request inventory,
+local visibility limits and optional diagnostic header policy. Guard neither
+uploads reports automatically nor rewrites the normal client's HTTPS identity.
 
 **Pause protection** seals ordinary traffic while retaining the approved route. **Resume protection** runs fresh checks. **Restore network** durably disables automatic rearming before removing Guard rules; if the VPN is absent, direct connectivity returns. Close protected applications first. Enabling automatic protection again requires the dashboard action.
 
@@ -48,6 +52,10 @@ Identity evidence expires after 12 seconds and is bound to session, service, int
 
 During an already admitted OPEN session, an independent HTTPS address service also checks the exact approved address. Its DNS is resolved over HTTPS inside the selected tunnel and cached privately; no physical DNS exception is added. If the trace endpoints are temporarily unavailable, a fresh matching independent response can maintain address identity only while the original accepted region/risk context remains valid. This fallback cannot establish initial/restart admission, extend the original region/risk expiry or hide any conflicting address/region response. Risk renewal still needs a new trace-region observation. Complete loss of valid address evidence still seals traffic. Bounded retries are displayed separately from actual blocking.
 
+The continuity service is AWS Check IP, separate from the Cloudflare trace endpoints. Its resolver cache binds the service hostname and respects the DNS answer's TTL, capped at ten minutes. Legacy or foreign-service entries, expired or future timestamps and invalid addresses are not reused. A zero-TTL answer is usable for its current lookup only. HTTPS validation and explicit tunnel binding remain required. AWS documents this TLS endpoint in its [Network Firewall examples](https://docs.aws.amazon.com/network-firewall/latest/developerguide/suricata-examples.html).
+
+An OPEN risk renewal starts only with enough remaining identity time for its two four-second HTTPS operations and local processing reserve. A streamed, newly accepted trace can schedule renewal while another health peer remains pending. Insufficient time defers the lookup until fresh identity; it never extends either original expiry. Expired or differently bound identity requires sealing. Every pending rejecting health reply is still processed.
+
 The primary guardian and independent recovery service use launchd's Interactive classification because network responsiveness depends on their deadlines, including while the dashboard is closed. They do not request a negative nice value or real-time scheduling. This avoids deliberately classifying security decisions as discretionary background work; actual resource usage and behavior under compilation load require host acceptance.
 
 Tailscale outer transport receives no direct physical bypass. Userspace Tailscale has no separate tunnel interface; do not claim that the legacy interface-scoped SSH exception enforces per-peer access for that mode. Coexistence and private development access need separate evidence.
@@ -58,12 +66,50 @@ This PF implementation cannot guarantee protection before its startup job enforc
 
 ## Developer validation
 
+The installed, pinned application accepts an explicit administrator-only
+`--resume` console action for an already approved route. It uses the same
+authenticated XPC operation, control revision and fresh admission as the
+dashboard. It cannot approve a new route, inject risk evidence or directly
+grant OPEN. This permits an authorized local upgrade controller to resume
+revalidation without an unattended GUI password dialog. Ordinary installation
+and use remain graphical.
+
 The development-machine matrix is in Acceptance.md. A clean target runs automatic setup and startup checks; it must still report any unsupported profile or failed live admission. Offline fixtures and another machine's results cannot establish every target environment's behavior.
 
 Developers need the Xcode command-line tools, Python 3 and Node for the browser fixture. Run `./build.sh`, the Python fixtures in Tests and `node Tests/browser_diagnostics_test.js`. `RENDER_PREVIEWS=1` renders native previews. Diagnostic entry points are compiled separately and excluded from shipped binaries. Optional Developer ID distribution uses `CODESIGN_IDENTITY`, `GUARD_TEAM_ID`, `INSTALLER_IDENTITY` and `NOTARY_PROFILE`.
 
 ### Pending health replies
 
-A completed matching response may continue an already OPEN identity while another request remains pending, only if the previous identity and risk evidence are still valid and the exact route, service and filter pass revalidation. A late response cannot revive expired OPEN. Conflicting proof, expired risk, a changed path or damaged rules seal independently of pending requests. The dashboard shows the private build number beside the beta version.
+A completed matching response may continue an already OPEN identity while another request remains pending, only if the previous identity and risk evidence are still valid and the exact route, service and filter pass revalidation. A late response cannot revive expired OPEN. Conflicting proof, expired risk, a changed path or damaged rules seal independently of pending requests. Initial/recovery requests retain a four-second transport budget. Already OPEN continuity permits up to eight seconds per concurrent request, but the previous twelve-second identity lease and original risk expiry still seal independently while requests are pending. A slow trace peer does not hold a completed independent client idle across its next proof interval. Failed attempts are spaced by at least two wall-clock seconds. Missing replies cannot extend either lease. Shutdown revokes OPEN before draining request children. The dashboard shows the private build number beside the version.
 
 The worker retains at most 60 root-only health-round rows for troubleshooting. Each row contains start/end times, starting/ending phases, the provider category, region provenance, the response timestamp, any seal reason, and the HTTP/transport-exit/body-received category for each provider. No address, response body, node credential or API key is recorded in these rows. A received body alone is not an accepted exit or risk verdict.
+
+A separate bounded transport-category log distinguishes TLS peer closure,
+certificate verification, timeout, resolution and connection failures. It
+contains fixed categories only. Raw error text is deleted after classification;
+no diagnostic category can grant or extend traffic permission.
+
+Each health provider has its own request slot. While already OPEN, a completed
+provider may refresh a matching observation while another provider remains slow.
+Requests never overlap for the same provider, retain the minimum retry spacing,
+and start only within the original bounded round window. Before reusing a slot,
+the worker joins its previous writer and consumes any completed rejecting reply.
+Initial admission, original evidence expiry and conflicting-address rejection
+are unchanged. A complete loss of valid observations still blocks traffic.
+
+Request completion is processed even when it is the last active provider or
+no further retry is allowed. The coordinator drains its owned request slots
+before ending the round. A final response cannot be skipped by a separate
+liveness poll, and a rejection is consumed before any retry clears its files.
+Reaping after a seal or fresh success does not authorize another attempt.
+
+Active independent continuity uses a separate DNS operator from the trace
+providers. A DNS cache expiry therefore does not make all three observations
+depend on the same operator. Resolution stays HTTPS-bound to the approved
+tunnel, with a fixed destination and strict response parsing. During OPEN,
+resolution may use up to four seconds of the existing eight-second independent
+request window. The target receives only the measured remaining time, with a
+local processing margin; a quick lookup preserves time for a slower target.
+Initial warming retains its two-second lookup. DNS TTLs are not extended; no physical DNS
+exception or system-resolver fallback is introduced. Initial admission and
+required risk renewal retain their stricter provider dependencies.

@@ -1,8 +1,8 @@
-# Claude Guard 0.4 private beta
+# Claude Guard 1.0 private edition
 
 Claude Guard is a native macOS network guard for a dedicated Shadowrocket route. It combines a menu-bar panel, dashboard, restrictive PF policy, supervised system worker, required exit-risk admission, local diagnostics and offline recovery. It supports macOS 13 or later on Apple Silicon and Intel, English and Simplified Chinese, system/light/dark appearance and custom selection controls.
 
-This is a private test edition. Successful compilation and offline fixtures do not establish physical network enforcement. Development evidence is recorded in [acceptance](Docs/Acceptance.md); target installation runs automatic setup and admission.
+This is a private distribution. Successful compilation and offline fixtures do not establish physical network enforcement. Development evidence is recorded in [acceptance](Docs/Acceptance.md); target installation runs automatic setup and admission.
 
 ## Installation
 

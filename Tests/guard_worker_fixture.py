@@ -123,11 +123,15 @@ else:
     (root / "service").write_text(service)
     (root / "vpn").write_text("utun6")
     clock = root / "date"
-    clock.write_text("""#!/usr/bin/python3
-from pathlib import Path
-import time
-offset = Path(__file__).with_name("clock-offset")
-print(int(time.time()) + (int(offset.read_text()) if offset.exists() else 0))
+    # Match the production native date call without starting a Python runtime
+    # at every polling tick. Only the private integer offset is simulated.
+    clock.write_text("""#!/bin/sh
+offset=0
+if [ -f "${0%/*}/clock-offset" ]; then
+    IFS= read -r offset < "${0%/*}/clock-offset" || true
+fi
+stamp=$(/bin/date +%s)
+printf '%s\\n' "$((stamp + offset))"
 """)
     clock.chmod(0o755)
     curl = root / "curl"
@@ -182,6 +186,13 @@ name = 'primary' if address == '1.1.1.1' else 'backup'
 with (root / 'probe-log').open('a') as log:
     print(name, file=log)
 import fcntl
+def transfer_event(outcome):
+    import time
+    with (root / 'transfer-events.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with (root / 'transfer-events').open('a') as log:
+            log.write(json.dumps({'provider': name, 'outcome': outcome,
+                'round': relative.parts[0], 'at': time.time()}) + '\\n')
 dropped = False
 with (root / 'probe-control.lock').open('a') as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
@@ -198,6 +209,7 @@ if dropped:
     if (root / 'cadence').exists():
         import time
         time.sleep(4)
+    transfer_event('injected-timeout')
     sys.exit(28)
 override = root / name
 value = (override if override.exists() else root / 'exit').read_text().strip()
@@ -219,6 +231,7 @@ elif value == 'nul':
 else:
     body = ('ip=' + value).encode()
 output.write_bytes(body)
+transfer_event('response')
 print(code, end='')
 """)
     curl.chmod(0o755)
@@ -329,7 +342,10 @@ sys.exit(result.returncode)
     runtime.mkdir(mode=0o700)
 
     definitions = script.split('action=${1-}')[0]
-    expired_wait = definitions + '''
+    refuse_sleep = root / 'refuse-sleep'
+    refuse_sleep.write_text('#!/bin/sh\nexit 99\n')
+    refuse_sleep.chmod(0o700)
+    expired_wait = definitions.replace('/bin/sleep', str(refuse_sleep)) + '''
 phase=OPEN; last_verified=1
 load_phase() { printf '%s|' "$1"; }
 rules_intact() { exit 99; }
@@ -337,7 +353,7 @@ publish() { printf '%s' "$3"; }
 guard_sleep 5
 '''
     expired = subprocess.run(['/bin/sh', '-c', expired_wait], check=True,
-                             capture_output=True, text=True, timeout=2)
+                             capture_output=True, text=True, timeout=10)
     assert expired.stdout == 'LOCKED|evidence-expired'
     probe = definitions + '\niface=utun6\nif sample_exit; then printf "PASS:%s" "$observed"; else printf FAIL; fi\n'
     hostile = {**os.environ, 'CURL_HOME': str(root), 'CURL_CA_BUNDLE': str(root),
@@ -458,6 +474,10 @@ build_rules "$1"
 
     if CADENCE:
         (root / 'cadence').touch()
+        marker = '  tmp=$(/usr/bin/mktemp "$directory/status.XXXXXX")'
+        assert script.count(marker) == 1
+        script = script.replace(marker, '''  printf '%s|%s|%s|%s|%s|%s\\n' "$now" "${last_verified:-0}" "${phase:-none}" "$1" "$3" "${health_request_budget:-0}" >> "$directory/proof-timing"
+''' + marker, 1)
         # Keep the production sleep ceiling. The usual accelerated fixture
         # cannot expose work accumulating across that production interval.
         script = script.replace('guard_sleep 1', 'guard_sleep 5')
@@ -480,6 +500,7 @@ build_rules "$1"
         assert int(status()[2]) - first >= 15
         assert (root / "probe-log").read_text().count("primary") >= 6
         if CADENCE:
+            injection_started = time.time()
             if sys.argv[1:] == ['--cadence']:
                 (root / 'drop-next').write_text('2')
             end = time.monotonic() + 30
@@ -493,11 +514,34 @@ build_rules "$1"
                     break
                 time.sleep(.1)
             print('CADENCE_RESULT ' + (failure or 'continuous-open'), flush=True)
+            if failure:
+                print('CADENCE_DIAGNOSTICS ' + json.dumps({
+                    'proofTiming': (runtime / 'proof-timing').read_text().splitlines()[-35:],
+                    'healthRounds': (runtime / 'health-events').read_text().splitlines()[-8:]
+                }), flush=True)
             if sys.argv[1:] == ['--cadence-baseline']:
                 assert failure == 'LOCKED:revalidating', failure
             else:
                 assert failure is None, failure
-                assert saw_retry, 'Bounded empty health round was not exercised'
+                transfers = [json.loads(line) for line in
+                             (root / 'transfer-events').read_text().splitlines()]
+                injected = [row for row in transfers if row['at'] >= injection_started
+                            and row['outcome'] == 'injected-timeout']
+                assert len(injected) == 2, 'Both delayed transport faults must actually execute'
+                assert (root / 'drop-next').read_text() == '0'
+                # A timely in-round retry can now recover before an empty round
+                # is published. Prove that recovery from request outcomes; do
+                # not require the older coordinator's intermediate UI reason.
+                # The full state-machine run separately requires probe-retry
+                # for a genuinely empty round and sealing on sustained failure.
+                recovered_in_round = any(
+                    reply['outcome'] == 'response' and reply['round'] == dropped['round']
+                    and reply['at'] > dropped['at']
+                    for dropped in injected for reply in transfers)
+                assert saw_retry or recovered_in_round, 'Fault recovery was not observed'
+                print('CADENCE_FAULT_RESULT ' + json.dumps({
+                    'injectedTimeouts': len(injected), 'emptyRoundPublished': saw_retry,
+                    'responseAfterTimeoutInSameRound': recovered_in_round}), flush=True)
         subprocess.run(production + ["stop"], check=True, capture_output=True)
         expect("IDLE")
         assert not list(runtime.glob('health.*'))

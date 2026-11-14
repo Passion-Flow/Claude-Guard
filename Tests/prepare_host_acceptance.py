@@ -139,7 +139,8 @@ def prepare(package, staging, pin_profile, admission_only=False, browser_phases=
         '"/var/run/org.claudeguard.runtime"', '"/var/run/org.claudeguard.acceptance"'))
     shared = ['Sources/NodeAdmission.swift', 'Sources/GuardRiskPolicy.swift', 'Sources/GuardService.swift',
               'Sources/GuardianStore.swift', 'Tests/guardian_host_trust.swift', 'Daemon/GuardianRecovery.swift',
-              'Daemon/GuardianPacketFence.swift', 'Daemon/GuardianPowerObserver.swift', 'Tests/packet_fence_host.swift']
+              'Daemon/GuardianPacketFence.swift', 'Daemon/GuardianPowerObserver.swift',
+              'Daemon/GuardianObservationLease.swift', 'Tests/packet_fence_host.swift']
     subprocess.run(['/usr/bin/xcrun', '--sdk', 'macosx', 'swiftc', '-swift-version', '5', '-O',
                     '-D', 'GUARD_DIAGNOSTICS', '-parse-as-library',
                     *[str(REPOSITORY / name) for name in shared], str(core), str(embedded), '-o', str(installed / 'FilterFixture')],

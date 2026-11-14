@@ -17,6 +17,7 @@
 "Approved exit (defaults to node)" = "批准出口（默认与节点相同）";
 "Approved tunnel" = "批准的隧道";
 "Beta" = "测试版";
+"Private edition" = "自用版";
 "Cancel" = "取消";
 "Certificate verification disabled" = "证书验证已关闭";
 "Checking" = "正在校验";
@@ -152,7 +153,7 @@
 "The trial ended and the original rules were restored." = "试运行到期，已恢复原有规则。";
 "The trial expired and traffic remains blocked. Continue protection or explicitly restore networking on this Mac." = "试运行到期，仍保持断网。可继续保护，或在本机明确恢复网络。";
 "The tunnel disappeared. Restore networking and run detection again." = "系统隧道已消失。请恢复网络后重新检测。";
-"This beta cannot validate the current packet-filter layout. Protection was not enabled." = "当前系统过滤规则布局不受此试用版支持，未启用保护。";
+"This edition cannot validate the current packet-filter layout. Protection was not enabled." = "当前版本无法验证系统过滤规则的布局，未启用保护。";
 "This removes the Claude Guard rules. Check the VPN connection separately." = "此操作撤销 Claude Guard 的规则。VPN 连接需要另行确认。";
 "Traffic blocked" = "已熔断";
 "Traffic path" = "链路防护";

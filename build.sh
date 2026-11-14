@@ -1,9 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-version=0.4.0
+version=1.0.0
 swift_compiler="$(xcrun --sdk macosx --find swiftc)"
-swift_sdk="$(xcrun --sdk macosx --show-sdk-path)"
+swift_sdk="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
+# Keep the Swift compiler and linker on the same explicitly selected SDK.
+export SDKROOT="$swift_sdk"
 swift_options=(-sdk "$swift_sdk")
 if swift_platform="$(xcrun --sdk macosx --show-sdk-platform-path 2>/dev/null)"; then
   swift_plugins="$swift_platform/Developer/usr/lib/swift/host/plugins"
@@ -69,8 +71,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleName</key><string>Claude Guard</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.4.0</string>
-<key>CFBundleVersion</key><string>30</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>42</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
@@ -182,6 +184,7 @@ PY
 cp "$package" "$build/image/"
 cp Docs/Installation.md "$build/image/Installation.md"
 cp Docs/Acceptance.md "$build/image/Acceptance.md"
+cp Docs/Privacy.md "$build/image/Privacy.md"
 image="$output/Claude-Guard-Mac-$version-private.dmg"
 hdiutil create -ov -format UDZO -volname 'Claude Guard' -srcfolder "$build/image" "$image" >/dev/null
 hdiutil verify "$image"

@@ -16,10 +16,11 @@ import tempfile
 import time
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-assert sys.argv[1:] in ([], ['--migration'], ['--clock'], ['--clock-baseline'], ['--clock-heartbeat-baseline'], ['--restart'], ['--restart-baseline'], ['--restart-stale'], ['--restart-stale-baseline'])
+assert sys.argv[1:] in ([], ['--migration'], ['--clock'], ['--clock-baseline'], ['--clock-heartbeat-baseline'], ['--restart'], ['--restart-baseline'], ['--restart-stale'], ['--restart-stale-baseline'], ['--observation'], ['--observation-baseline'], ['--admitting'], ['--admitting-baseline'])
 MIGRATION_FIXTURE = sys.argv[1:] == ['--migration']
 CLOCK_FIXTURE = sys.argv[1:] in (['--clock'], ['--clock-baseline'], ['--clock-heartbeat-baseline'])
 RESTART_FIXTURE = sys.argv[1:] in (['--restart'], ['--restart-baseline'], ['--restart-stale'], ['--restart-stale-baseline'])
+OBSERVATION_FIXTURE = sys.argv[1:] in (['--observation'], ['--observation-baseline'], ['--admitting'], ['--admitting-baseline'])
 
 with tempfile.TemporaryDirectory(prefix="cg-core-test-") as work:
     root = Path(work)
@@ -72,8 +73,14 @@ umask 077
 directory=FIXTURE_DIRECTORY
 publish() {
   if [ -f "$directory/../pause-test-heartbeat" ]; then return; fi
+  if [ -f "$directory/../pause-test-publication" ]; then return; fi
   stamp=$(/bin/date +%s)
-  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|1|11111111-1111-1111-1111-111111111111|%s:%s/%s|ipv4-tunnel-v9|%s\n' "$session" "$phase" "$stamp" "$iface" "$expected" "$expected" "$reason" "$deadline" "$mode" "$peer" "$port" "$transport" "$stamp" > "$directory/status"
+  if [ ! -f "$directory/../pause-test-proof" ]; then observation=$stamp; fi
+  proof_phase=$phase; status_phase=$phase
+  if [ -f "$directory/../prepare-test-admission" ]; then proof_phase=ADMITTING; status_phase=LOCKED; fi
+  printf '1|%s|%s|%s|%s|%s|%s|11111111-1111-1111-1111-111111111111|%s:%s/%s|%s|1\n' "$session" "$proof_phase" "$stamp" "${observation:-$stamp}" "$stamp" "$iface" "$peer" "$port" "$transport" "$expected" > "$directory/evidence.tmp"
+  /bin/mv -f "$directory/evidence.tmp" "$directory/evidence"
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|1|11111111-1111-1111-1111-111111111111|%s:%s/%s|ipv4-tunnel-v9|%s\n' "$session" "$status_phase" "$stamp" "$iface" "$expected" "$expected" "$reason" "$deadline" "$mode" "$peer" "$port" "$transport" "$stamp" > "$directory/status"
 }
 if [ "$1" = stop ]; then
   if [ -d "$directory/active" ]; then
@@ -164,6 +171,8 @@ struct GuardianTrust {
         path.write_text(text)
         sources.append(str(path))
     core = (REPOSITORY / "Daemon/GuardianCore.swift").read_text()
+    if sys.argv[1:] in (['--observation-baseline'], ['--admitting-baseline']):
+        core = Path(os.environ['GUARD_CORE_BASELINE']).read_text()
     if CLOCK_FIXTURE:
         # Only the copied Core's wall clock changes. The actual host clock,
         # installed service and all system processes remain untouched.
@@ -184,8 +193,9 @@ struct GuardianTrust {
     sources += [str(root / "GuardianCore.swift"), str(root / "FixtureSource.swift"), str(root / "FixtureTrust.swift"),
                 str(root / "GuardianRecovery.swift"),
                 str(REPOSITORY / "Daemon/GuardianPacketFence.swift"),
+                str(REPOSITORY / "Daemon/GuardianObservationLease.swift"),
                 str(REPOSITORY / "Daemon/GuardianPowerObserver.swift"),
-                str(REPOSITORY / "Tests" / ("guardian_migration_fixture.swift" if MIGRATION_FIXTURE else ("guardian_restart_fixture.swift" if RESTART_FIXTURE else ("guardian_clock_fixture.swift" if CLOCK_FIXTURE else "guardian_core_fixture.swift"))))]
+                str(REPOSITORY / "Tests" / ("guardian_observation_fixture.swift" if OBSERVATION_FIXTURE else ("guardian_migration_fixture.swift" if MIGRATION_FIXTURE else ("guardian_restart_fixture.swift" if RESTART_FIXTURE else ("guardian_clock_fixture.swift" if CLOCK_FIXTURE else "guardian_core_fixture.swift")))))]
     if MIGRATION_FIXTURE:
         sources += [str(REPOSITORY / "Sources/ShadowrocketProfile.swift"),
                     str(REPOSITORY / "Sources/AutomaticDiscovery.swift")]
@@ -195,6 +205,10 @@ struct GuardianTrust {
         arguments = [str(executable), str(root)]
         if sys.argv[1:] == ['--clock-baseline']:
             arguments.append('--expect-vulnerable')
+        if sys.argv[1:] in (['--observation-baseline'], ['--admitting-baseline']):
+            arguments.append('--expect-vulnerable')
+        if sys.argv[1:] in (['--admitting'], ['--admitting-baseline']):
+            arguments.append('--admitting')
         if sys.argv[1:] == ['--clock-heartbeat-baseline']:
             arguments.append('--expect-heartbeat-vulnerable')
         if sys.argv[1:] in (['--restart-baseline'], ['--restart-stale-baseline']):

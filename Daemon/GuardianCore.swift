@@ -15,6 +15,7 @@ final class GuardianCore {
     private var heartbeatSession: String?
     private var heartbeatStamp: String?
     private var heartbeatObservedAt: TimeInterval?
+    private var observationLease = GuardianObservationLease()
     private var corruptionSealed = false
     private let workerDirectory = "/var/run/org.claudeguard.runtime"
     private let evaluator = GuardianTrust.directory + "/GuardDaemon"
@@ -53,7 +54,7 @@ final class GuardianCore {
 
     func startSupervision() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: 1)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(250), leeway: .milliseconds(20))
         timer.setEventHandler { [weak self] in self?.supervise() }
         self.timer = timer
         timer.resume()
@@ -335,7 +336,16 @@ final class GuardianCore {
                     let fields = statusFields()
                     let fresh = heartbeatFresh(fields, intent: intent)
                     let launchAge = ProcessInfo.processInfo.systemUptime - lastLaunch
-                    if fresh || (0...15).contains(launchAge) {
+                    let proof = boundedFile(workerDirectory + "/evidence", limit: 2048, privateOnly: true)
+                    let evidenceOpen = intent.session.map { session in
+                        ["OPEN", "ADMITTING"].contains { proof?.hasPrefix("1|" + session + "|" + $0 + "|") == true }
+                    } ?? false
+                    let reportsOpen = evidenceOpen || (fields?[0] == intent.session && fields?[1] == "OPEN" &&
+                        !restrictivePublication(intent, text: proof))
+                    let proofFresh = !reportsOpen || observationFresh(fields, intent: intent, text: proof, allowPrepared: true)
+                    // Startup grace covers a worker that has not published an
+                    // OPEN decision. It never protects expired OPEN evidence.
+                    if (fresh && proofFresh) || (!reportsOpen && (0...15).contains(launchAge)) {
                         if fields?[0] == intent.session && fields?[1] == "OPEN" {
                             restartDelay = 1
                             nextRestart = 0
@@ -413,6 +423,7 @@ final class GuardianCore {
         heartbeatSession = nil
         heartbeatStamp = nil
         heartbeatObservedAt = nil
+        observationLease = GuardianObservationLease()
         let data = Data((key + "\n" + fields.joined(separator: "|") + "\n" + evaluator + "\n").utf8)
         try input.fileHandleForWriting.write(contentsOf: data)
         try input.fileHandleForWriting.close()
@@ -432,7 +443,8 @@ final class GuardianCore {
                 if let ownedChild, ownedChild.processIdentifier == pid { return ownedChild.isRunning }
                 return knownWorkerPID() == pid
             }
-            let deadline = ProcessInfo.processInfo.systemUptime + 6
+            // OPEN is revoked above, before draining bounded health children.
+            let deadline = ProcessInfo.processInfo.systemUptime + 10
             while stillRunning() && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.05) }
             if stillRunning() {
                 kill(pid, SIGKILL)
@@ -481,12 +493,13 @@ final class GuardianCore {
         return pid
     }
 
-    private func boundedFile(_ path: String, limit: Int) -> String? {
+    private func boundedFile(_ path: String, limit: Int, privateOnly: Bool = false) -> String? {
         let file = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
         guard file >= 0 else { return nil }
         defer { close(file) }
         var metadata = stat()
         guard fstat(file, &metadata) == 0, metadata.st_uid == 0, metadata.st_mode & S_IFMT == S_IFREG,
+              (!privateOnly || metadata.st_mode & 0o077 == 0), metadata.st_size >= 0,
               metadata.st_size <= limit else { return nil }
         let handle = FileHandle(fileDescriptor: file, closeOnDealloc: false)
         guard let bytes = try? handle.read(upToCount: limit + 1), bytes.count <= limit else { return nil }
@@ -520,6 +533,27 @@ final class GuardianCore {
         return matches(status, intent: intent) && (0...12).contains(now - observed)
     }
 
+    private func observationFresh(_ status: [String]?, intent: GuardianIntent, text: String? = nil,
+                                  allowPrepared: Bool = false) -> Bool {
+        guard let status, status.count == 14,
+              let session = intent.session, status[0] == session,
+              let service = intent.serviceID, status[10] == service,
+              let route = intent.route,
+              let text = text ?? boundedFile(workerDirectory + "/evidence", limit: 2048, privateOnly: true) else { return false }
+        let fields = text.components(separatedBy: "|")
+        guard fields.count == 11, fields[2] == "OPEN" || (allowPrepared && fields[2] == "ADMITTING") else { return false }
+        return observationLease.accepts(text, session: session, service: service, interface: fields[6],
+            endpoint: route.endpointKey, expected: route.expected,
+            wall: Date().timeIntervalSince1970, uptime: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func restrictivePublication(_ intent: GuardianIntent, text: String?) -> Bool {
+        guard let session = intent.session, let service = intent.serviceID, let route = intent.route,
+              let text else { return false }
+        return GuardianObservationLease.restrictivePublication(text, session: session, service: service,
+            endpoint: route.endpointKey, expected: route.expected, wall: Date().timeIntervalSince1970)
+    }
+
     private func snapshot(_ intent: GuardianIntent, code: Int32 = 0) -> GuardianResponse {
         var response = GuardianResponse(code: code)
         response.active = intent.armed || intent.maintenance || FileManager.default.fileExists(atPath: workerDirectory + "/active")
@@ -544,7 +578,8 @@ final class GuardianCore {
         }
         response.workerAlive = knownWorkerPID() != nil
         if let fields = statusFields(), fields[0] == intent.session || (fields[1] == "IDLE" && !intent.armed && !intent.maintenance) {
-            if fields[1] != "OPEN" || (matches(fields, intent: intent) && fence.permitsOpen(fields[0])) {
+            if fields[1] != "OPEN" || (matches(fields, intent: intent) &&
+                observationFresh(fields, intent: intent) && fence.permitsOpen(fields[0])) {
                 response.status = fields.joined(separator: "|")
             }
         }

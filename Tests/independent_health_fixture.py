@@ -19,7 +19,7 @@ a=sys.argv[1:]
 assert a[0]=='-q' and a[a.index('--interface')+1]=='if!utun1'
 assert a[a.index('--noproxy')+1]=='*' and a[a.index('--proto')+1]=='=https'
 assert '--tlsv1.2' in a and '--location' not in a and '-k' not in a
-name='independent' if a[-1]=='https://api.ipify.org' else ('primary' if a[-1].startswith('https://1.1.1.1/') else 'backup')
+name='independent' if a[-1]=='https://checkip.amazonaws.com' else ('primary' if a[-1].startswith('https://1.1.1.1/') else 'backup')
 with (root/'calls').open('a') as f:f.write(name+'\\n')
 case=json.loads((root/'scenario.json').read_text())[name]
 time.sleep(case.get('delay',.05))
@@ -54,7 +54,7 @@ publish() {{ return 0; }}
         (root / 'scenario.json').write_text(json.dumps({
             'primary': primary or {}, 'backup': backup or {}, 'independent': independent or {}}))
         (root / 'calls').write_text('')
-        (runtime / 'independent-address').write_text('9.9.9.9|' + str(int(time.time())))
+        (runtime / 'independent-address').write_text('9.9.9.9|' + str(int(time.time())) + '|600|checkip.amazonaws.com')
         command = definitions + setup + extra + '''
 if sample_exit; then
  printf '%s|%s|%s|%s' "$observed" "$observed_region" "$probe_used" "$probe_region_source"

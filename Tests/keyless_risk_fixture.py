@@ -130,6 +130,49 @@ tunnel_response() {{
     unthrottle()
     assert review('phase=OPEN\ntunnel_response() { printf 200 > "$directory/transport-status"; return 1; }\n') == '2|risk-invalid-response'
     assert not (runtime / 'risk-cache').exists()
+    # A status line does not complete a response. Known incomplete transfers
+    # retain only the original evidence; unknown/local/validation failures do
+    # not inherit that availability classification from an old transport file.
+    for transfer_code in (16, 18, 28, 52, 55, 56, 92, 0, 23, 60, 63, 99):
+        reset()
+        cached(2710)
+        unthrottle()
+        original = (runtime / 'risk-cache').read_bytes()
+        failing = f'''phase=OPEN
+tunnel_response() {{
+  printf 200 > "$directory/transport-status"
+  printf {transfer_code} > "$directory/transport-exit"
+  return 1
+}}
+'''
+        incomplete = transfer_code in (16, 18, 28, 52, 55, 56, 92)
+        expected_issue = 'risk-provider-unavailable' if incomplete else 'risk-invalid-response'
+        assert review(failing) == '2|' + expected_issue, transfer_code
+        if incomplete:
+            assert (runtime / 'risk-cache').read_bytes() == original
+            assert not (runtime / 'risk-last-attempt').exists()
+            assert review(failing) == '2|risk-rate-limited'
+        else:
+            assert not (runtime / 'risk-cache').exists()
+        lines = (runtime / 'risk-transports').read_text().splitlines()
+        assert len(lines) == 1 and lines[0].split('|')[2:] == ['OPEN', '200', str(transfer_code), 'failed']
+    reset()
+    cached(2710)
+    unthrottle()
+    (runtime / 'transport-exit').write_text('28')
+    assert review('phase=OPEN\ntunnel_response() { printf 200 > "$directory/transport-status"; return 1; }\n') == '2|risk-invalid-response'
+    assert not (runtime / 'risk-cache').exists(), 'stale transport metadata authorized cache retention'
+    reset()
+    diagnostic = '''risk_now=$(/bin/date +%s)
+phase=OPEN
+printf '200\\nprivate-secret' > "$directory/transport-status"
+printf '28\\nprivate-secret' > "$directory/transport-exit"
+for item in $(/usr/bin/jot 65); do record_risk_transport failed; done
+'''
+    shell(diagnostic)
+    lines = (runtime / 'risk-transports').read_text().splitlines()
+    assert len(lines) == 60 and all(line.split('|')[2:] == ['OPEN', 'unknown', 'unknown', 'failed'] for line in lines)
+    assert 'private-secret' not in (runtime / 'risk-transports').read_text()
     reset()
     today = time.strftime('%Y%m%d', time.gmtime())
     ledger = boot / 'risk-query-budget'
