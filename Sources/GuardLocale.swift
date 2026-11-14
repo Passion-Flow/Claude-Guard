@@ -70,7 +70,7 @@ enum GuardAppearance: String, CaseIterable {
 
 enum GuardPolicy {
     static let id = GuardianSchema.policy
-    static let version = "1.0.0"
+    static let version = "1.0.1"
     static let preferences = UserDefaults(suiteName: "org.claudeguard.appearance") ?? .standard
 }
 

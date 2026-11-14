@@ -45,6 +45,7 @@ enum GuardianInstaller {
                 intent.advanceControlRevision()
                 try store.write(intent)
             }
+            try installRecoveryKit()
             // Remove the obsolete recovery launcher only when its identity matches.
             let legacy = URL(fileURLWithPath: "/Applications/Claude Guard Recovery.app")
             if Bundle(url: legacy)?.bundleIdentifier == "org.claudeguard.recovery" {
@@ -54,30 +55,30 @@ enum GuardianInstaller {
         } catch { return 74 }
     }
 
-    static func uninstall(core: GuardianCore) -> Int32 {
-        guard geteuid() == 0, GuardianTrust.load() != nil else { return 78 }
-        let restored = core.restoreLocal()
-        guard restored == 0 else { return restored }
-        for label in [GuardianIdentity.daemon, GuardianIdentity.recoveryDaemon] {
-            _ = launchctl(["bootout", "system/" + label])
-            guard launchctl(["print", "system/" + label]) != 0 else { return 74 }
-        }
+    static func uninstall() -> Int32 {
+        guard geteuid() == 0 else { return 77 }
         do {
-            if let trust = GuardianTrust.load(), trust.ownerUID >= 501 {
-                _ = launchctl(["bootout", "gui/" + String(trust.ownerUID) + "/org.claudeguard.mac"])
-            }
-            let agent = "/Library/LaunchAgents/org.claudeguard.mac.plist"
-            if FileManager.default.fileExists(atPath: agent) { try FileManager.default.removeItem(atPath: agent) }
-            for name in ["org.claudeguard.daemon.plist", "org.claudeguard.offline-recovery.plist"] {
-                let path = "/Library/LaunchDaemons/" + name
-                if FileManager.default.fileExists(atPath: path) { try FileManager.default.removeItem(atPath: path) }
-            }
-            for identifier in [GuardianIdentity.application] {
-                if let path = components[identifier] { try FileManager.default.removeItem(atPath: path) }
-            }
-            try FileManager.default.removeItem(atPath: GuardianTrust.directory)
+            try GuardianUninstall().perform()
             return 0
         } catch { return 74 }
+    }
+
+    private static func installRecoveryKit() throws {
+        let path = GuardianUninstall.recoveryDirectory
+        for parent in ["/Users", "/Users/Shared"] {
+            var metadata = stat()
+            guard lstat(parent, &metadata) == 0, metadata.st_uid == 0,
+                  metadata.st_mode & S_IFMT == S_IFDIR else { throw GuardianUninstall.Failure.unsafePath }
+        }
+        if mkdir(path, 0o755) != 0 && errno != EEXIST { throw GuardianUninstall.Failure.filesystem }
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0, metadata.st_uid == 0,
+              metadata.st_mode & S_IFMT == S_IFDIR, metadata.st_mode & 0o022 == 0 else { throw GuardianUninstall.Failure.unsafePath }
+        let source = URL(fileURLWithPath: "/Applications/Claude Guard.app/Contents/Resources/Uninstall.pkg")
+        let destination = URL(fileURLWithPath: path).appendingPathComponent("Uninstall.pkg")
+        let data = try Data(contentsOf: source)
+        try data.write(to: destination, options: .atomic)
+        guard chmod(destination.path, 0o644) == 0, chown(destination.path, 0, 0) == 0 else { throw GuardianUninstall.Failure.permission }
     }
 
     static func launchctl(_ arguments: [String]) -> Int32 {

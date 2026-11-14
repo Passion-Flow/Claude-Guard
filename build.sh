@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-version=1.0.0
+version=1.0.1
 swift_compiler="$(xcrun --sdk macosx --find swiftc)"
 swift_sdk="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
 # Keep the Swift compiler and linker on the same explicitly selected SDK.
@@ -71,8 +71,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleName</key><string>Claude Guard</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0.0</string>
-<key>CFBundleVersion</key><string>42</string>
+<key>CFBundleShortVersionString</key><string>1.0.1</string>
+<key>CFBundleVersion</key><string>43</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
@@ -86,13 +86,19 @@ for side in 16 32 128 256 512; do
 done
 iconutil -c icns "$build/Guard.iconset" -o "$app/Contents/Resources/Guard.icns"
 cp -R Resources/. "$app/Contents/Resources/"
+mkdir -p "$build/uninstall-scripts"
+cp Installer/UninstallScripts/postinstall "$build/uninstall-scripts/postinstall"
+universal "$build/uninstall-scripts/GuardUninstall" -parse-as-library Daemon/GuardianUninstall.swift Maintenance/UninstallMain.swift
+sign "$build/uninstall-scripts/GuardUninstall" org.claudeguard.uninstaller
 for name in OfflineRecovery Uninstall; do
   scripts=Installer/RecoveryScripts
-  [[ "$name" != Uninstall ]] || scripts=Installer/UninstallScripts
+  [[ "$name" != Uninstall ]] || scripts="$build/uninstall-scripts"
   pkgbuild --root "$build/empty" --scripts "$scripts" --identifier "org.claudeguard.private.$name" \
     --version "$version" --install-location / --ownership recommended "$build/image/$name.pkg" >/dev/null
   cp "$build/image/$name.pkg" "$app/Contents/Resources/"
 done
+uninstall_package="$output/Claude-Guard-Uninstall-$version.pkg"
+cp "$build/image/Uninstall.pkg" "$uninstall_package"
 sign "$app" org.claudeguard.mac
 helperdir="$build/payload/Library/PrivilegedHelperTools/org.claudeguard"
 mkdir -p "$helperdir" "$build/payload/Library/LaunchDaemons"
@@ -193,5 +199,5 @@ if [[ "$identity" != - && -n "${NOTARY_PROFILE:-}" ]]; then
   xcrun notarytool submit "$image" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$image"
 fi
-(cd "$output" && shasum -a 256 "$(basename "$package")" "$(basename "$image")" > SHA256SUMS)
+(cd "$output" && shasum -a 256 "$(basename "$package")" "$(basename "$image")" "$(basename "$uninstall_package")" > SHA256SUMS)
 echo 'PASS: universal private installer, pinned payload, offline diagnostics and archive inspection; no live installation performed.'

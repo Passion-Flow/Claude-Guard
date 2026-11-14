@@ -3,8 +3,6 @@ set -eu
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C
 [ "$(/usr/bin/id -u)" = 0 ] || exit 77
 [ "${3:-/}" = / ] || exit 1
-directory=/Library/PrivilegedHelperTools/org.claudeguard
-if [ -x "$directory/GuardDaemon" ]; then
-  if "$directory/GuardDaemon" --uninstall; then exit 0; fi
-fi
-exec "$directory/GuardOfflineRecovery" --uninstall
+# The package carries its own native removal engine. Cleaner tools may already
+# have removed every installed executable and its trust metadata.
+exec "$(/usr/bin/dirname "$0")/GuardUninstall" --uninstall

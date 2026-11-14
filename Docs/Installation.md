@@ -4,7 +4,7 @@ Requires macOS 13 or later. One universal native application supports Apple Sili
 
 ## Install and use
 
-1. Extract the complete archive and double-click **Claude-Guard-Mac-1.0.0-private.pkg**. Authorize the installer with the macOS administrator prompt.
+1. Extract the complete archive and double-click **Claude-Guard-Mac-1.0.1-private.pkg**. Authorize the installer with the macOS administrator prompt.
 2. If Gatekeeper blocks this private, ad-hoc-signed build, use the per-file **Open Anyway** action for the reviewed installer. Do not disable Gatekeeper or SIP. [Apple instructions](https://support.apple.com/en-us/102445)
 3. Claude Guard starts in the login session. Connect the already configured dedicated Shadowrocket profile with a numeric IPv4 server address and Global Routing set to Proxy. Allow a macOS app-data privacy prompt if it appears. The dashboard detects supported profile metadata, the signed provider's live endpoint, the tunnel and its observed exit. There are no required node, port, tunnel or API-key fields.
 4. Detection enables persistent enforcement automatically. Ordinary applications are released only after six exit observations spanning at least 15 seconds and accepted risk evidence. Missing configuration, unsupported metadata or a disconnected VPN before first activation means **protection is not yet active**; the dashboard states this explicitly.
@@ -42,7 +42,15 @@ uploads reports automatically nor rewrites the normal client's HTTPS identity.
 
 There is only one installed application icon. **Open offline recovery** opens that application's restricted recovery mode, backed by a separate recovery-only XPC service. If the GUI is unavailable, double-click the included **OfflineRecovery.pkg**. Recovery runs locally with administrator authorization, stops the primary service before acquiring its control lock, disarms intent and removes only Guard-owned rules. Keep that package locally. Both helpers and the operating system's service manager/PF must remain functional; repair damaged executables with the matched installer.
 
-Use the matched **Uninstall.pkg** to restore networking and remove Guard-owned app/jobs/helpers. Upgrades preserve restrictive maintenance state. Approvals from policies before v9 are revoked and require fresh automatic setup through the dashboard; old Resume cannot reuse them. A previous standalone guardian must first be restored with its own tool.
+To uninstall, choose **Claude Guard → Uninstall Claude Guard…** in the application menu and authorize Installer. Use this before a cleaner or moving the app to Trash. Deleting application files alone does not run privileged removal and can leave the restrictive filter active. Apple's guidance likewise recommends an application's own uninstaller for its login items and other components. [Apple uninstall guidance](https://support.apple.com/en-gb/102610)
+
+Version 1.0.1 installs an independent copy at **/Users/Shared/Claude Guard Recovery/Uninstall.pkg**. Open it in Finder if the application or helpers have already been removed. The standalone release asset **Claude-Guard-Uninstall-1.0.1.pkg** provides the same operation without installed components or network access. Keep a separate copy: a privileged cleaner can remove any local file, including the recovery kit. The original v1.0.0 uninstall package depended on installed helpers and must not be used to recover a partially deleted installation.
+
+Removal first stops Guard's startup jobs and rule writers, then clears and reads back only the product's PF anchor. It releases recorded Guard PF references and removes product app/helper/runtime files, known user preferences and caches, and installation receipts. Missing files are harmless; an unconfirmed rule cleanup is a failure. A bounded, one-shot task removes the uninstaller's receipt after Installer commits it, and then removes its own job and temporary executable. Re-running uninstall is supported. No global PF disable, foreign-rule flush or unrelated state flush occurs. Unknown PF references whose ownership records were deleted by a cleaner cannot safely be attributed and are not guessed; empty product rules no longer block traffic.
+
+Removal preserves other applications, VPN profiles, exported reports and downloaded archives. System-managed Installer/audit history is not erased. See [maintenance validation](Maintenance-Validation.md) for the partial-removal checks and their scope. Restore network is a separate operation that keeps the app installed; the older OfflineRecovery.pkg still requires its installed recovery helper.
+
+Upgrades preserve restrictive maintenance state. Approvals from policies before v9 are revoked and require fresh automatic setup through the dashboard; old Resume cannot reuse them. A previous standalone guardian must first be restored with its own tool.
 
 ## Enforcement boundaries
 

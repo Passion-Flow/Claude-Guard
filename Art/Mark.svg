@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Claude Guard shield">
+  <rect x="82" y="82" width="860" height="860" rx="185" fill="#17294a"/>
+  <path d="M512 229Q626 283 742 316Q735 632 512 782Q289 632 282 316Q398 283 512 229Z" fill="#2ba1b8" fill-opacity=".23" stroke="#75e6e0" stroke-width="31" stroke-linejoin="round"/>
+  <path d="m402 512 78 82 147-154" fill="none" stroke="#e0fffa" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

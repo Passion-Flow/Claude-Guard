@@ -40,6 +40,9 @@ if action=='--initialize': (Path(__file__).parent/'install-trust.json').write_te
     for name in ("GuardDaemon", "GuardOfflineRecovery"):
         (directory / name).write_text(helper)
         (directory / name).chmod(0o755)
+    standalone = root / "GuardUninstall"
+    standalone.write_text('#!/bin/sh\n[ "$1" = --uninstall ] || exit 64\nexit 0\n')
+    standalone.chmod(0o755)
     launchctl = root / "launchctl"
     launchctl.write_text('''#!/usr/bin/python3
 from pathlib import Path
@@ -64,6 +67,7 @@ else: sys.exit(64)
         text = text.replace('$(/usr/bin/id -u)', '0').replace('/usr/sbin/chown', '/usr/bin/true')
         text = text.replace("$(/usr/bin/stat -f '%u' /dev/console)", '0')
         text = text.replace('/bin/launchctl', str(launchctl)).replace('/Library/', str(library) + '/')
+        text = text.replace('$(/usr/bin/dirname "$0")/GuardUninstall', str(standalone))
         return subprocess.run(['/bin/sh', '-c', text, 'fixture', 'fixture.pkg', '/', target],
                               capture_output=True, text=True)
 
@@ -94,9 +98,11 @@ else: sys.exit(64)
     assert run("RecoveryScripts/postinstall").returncode == 0
     assert (root / "rules").read_text() == "CLEAR"
     (root / "fail-GuardDaemon").touch()
+    (directory / "GuardOfflineRecovery").unlink()
+    (directory / "GuardDaemon").unlink()
     assert run("UninstallScripts/postinstall").returncode == 0
-    assert (root / "events").read_text().endswith("GuardOfflineRecovery --uninstall\n")
+    assert run("UninstallScripts/postinstall", "/other-volume").returncode != 0
     tree = ET.parse(REPOSITORY / "Installer/Distribution.xml")
     assert tree.find("domains").attrib["enable_currentUserHome"] == "false"
     assert tree.find("options").attrib["rootVolumeOnly"] == "true"
-    print("PASS: clean installation, sealed upgrade, failed preparation/bootout/bootstrap, legacy refusal, offline recovery and uninstall fallback")
+    print("PASS: clean installation, sealed upgrade, failed preparation/bootout/bootstrap, legacy refusal, offline recovery and independent package uninstall")

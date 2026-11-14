@@ -82,6 +82,9 @@ enum GuardianDaemon {
         guard filterCommand || args.count == 1 || (args.count == 2 && ["--initialize", "--prepare-upgrade", "--restore-local", "--uninstall"].contains(args[1])) else { exit(64) }
         guard geteuid() == 0 else { exit(77) }
         if args.count == 2, args[1] == "--initialize" { exit(GuardianInstaller.initialize()) }
+        // Explicit root CLI removal remains available even if a cleaner has
+        // removed the app, pinned trust metadata, or approval state.
+        if args.count == 2, args[1] == "--uninstall" { exit(GuardianInstaller.uninstall()) }
         #if GUARD_OFFLINE_RECOVERY
         let identity = GuardianIdentity.recoveryDaemon
         #else
@@ -122,7 +125,6 @@ enum GuardianDaemon {
         #endif
         if args.count == 2, args[1] == "--restore-local" { exit(core.restoreLocal()) }
         if args.count == 2, args[1] == "--prepare-upgrade" { exit(core.prepareUpgrade()) }
-        if args.count == 2, args[1] == "--uninstall" { exit(GuardianInstaller.uninstall(core: core)) }
         guard args.count == 1 else { exit(64) }
         #if GUARD_OFFLINE_RECOVERY
         let channels = [(GuardianIdentity.recoveryDaemon, true)]

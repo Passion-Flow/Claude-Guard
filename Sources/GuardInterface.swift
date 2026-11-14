@@ -15,6 +15,17 @@ struct GuardApplication: App {
                 .task { if controller.check == nil { controller.detect() } }
         }
         .defaultSize(width: 1060, height: 790)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button(GuardText("Uninstall Claude Guard…")[language]) {
+                    if !GuardMaintenance.openPackage("Uninstall") {
+                        let alert = NSAlert()
+                        alert.messageText = GuardText("Open the matching recovery package from the installation image.")[language]
+                        alert.runModal()
+                    }
+                }
+            }
+        }
 
         MenuBarExtra {
             GuardMenu(controller: controller, language: language)

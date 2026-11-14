@@ -75,11 +75,9 @@ struct RecoveryWindow: View {
     }
 
     private func openPackage(_ name: String) {
-        guard GuardianIdentity.currentProcessMatches(GuardianIdentity.application),
-              let url = Bundle.main.url(forResource: name, withExtension: "pkg") else {
+        guard GuardMaintenance.openPackage(name) else {
             result = GuardText("Open the matching recovery package from the installation image.")
             return
         }
-        NSWorkspace.shared.open(url)
     }
 }
