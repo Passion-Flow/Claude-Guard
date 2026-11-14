@@ -2,6 +2,11 @@ import Darwin
 import Foundation
 
 @main enum CoreFixture {
+    static let began = ProcessInfo.processInfo.systemUptime
+    static func progress(_ stage: String) {
+        let elapsed = String(format: "%.3f", ProcessInfo.processInfo.systemUptime - began)
+        FileHandle.standardError.write(Data("CORE_FIXTURE_PROGRESS stage=\(stage) seconds=\(elapsed)\n".utf8))
+    }
     static func precondition(_ condition: @autoclosure () -> Bool, _ message: String = "",
                              line: UInt = #line) {
         guard condition() else {
@@ -50,6 +55,7 @@ import Foundation
     }
 
     static func run(at base: URL) throws {
+        progress("begin")
         let store = try GuardianStore()
         let fence = try GuardianPacketFence.fixture(directory: store.directory,
                                                     pf: base.appendingPathComponent("pfctl").path)
@@ -108,6 +114,7 @@ import Foundation
         until { phase("OPEN") }
 
         // Corrupt durable approval must revoke a still-running worker.
+        progress("restart-and-upgrade-passed")
         try store.locked {
             try Data("invalid intent".utf8).write(to: URL(fileURLWithPath: store.directory + "/intent.json"))
         }
@@ -140,6 +147,7 @@ import Foundation
 
         // Reproduce a stopped primary holding the shared lock. A bounded normal
         // attempt must fail, while authorized independent recovery preempts it.
+        progress("durable-state-and-trial-expiry-passed")
         precondition(trial().code == 0)
         until { phase("OPEN") }
         let holder = Process()
@@ -165,6 +173,7 @@ import Foundation
         precondition(!FileManager.default.fileExists(atPath: base.appendingPathComponent("runtime/active").path))
         // Automatic admission has no API key or trial confirmation, but still
         // requires authenticated, typed profile evidence and an exact endpoint.
+        progress("independent-recovery-passed")
         let evidence = TransportEvidence(endpointKey: route.endpointKey, kind: .vmessAEAD)
         let fingerprint = String(repeating: "a", count: 64)
         let automatic = GuardianRequest(.activate, session: UUID().uuidString, route: route,
@@ -241,6 +250,7 @@ import Foundation
         precondition(request(automatic, core: core, freshIntent: true).code == 0)
         until { phase("OPEN") }
         let beforeRecovery = request(GuardianRequest(.state), core: core)
+        progress("automatic-admission-and-migration-passed")
         let queuedBeforeRecoveryInvalidation = GuardianRequest(.invalidate,
             controlRevision: beforeRecovery.controlRevision)
         var queuedAutomatic = automatic
@@ -312,6 +322,7 @@ import Foundation
         // A fallback seal from a transient filter/control failure is distinct
         // from pending sleep. A registered, awake observer permits fresh
         // supervision after metadata recovery, without manual restore.
+        progress("stale-intent-and-replay-controls-passed")
         let fallbackSession = try store.locked { try store.read().session }
         try fence.inhibit()
         until { (try? store.locked { try store.read().session }) != fallbackSession && phase("OPEN") }
@@ -370,6 +381,7 @@ import Foundation
         let afterWakeRestore = request(GuardianRequest(.state), core: core)
         precondition(!afterWakeRestore.active && !afterWakeRestore.automaticEnabled)
         precondition(!FileManager.default.fileExists(atPath: base.appendingPathComponent("runtime/active").path))
+        progress("sleep-wake-and-restoration-passed")
         print("PASS: root-authoritative admission, authorization denial, durable recovery, stale activation/invalidation/trial/resume rejection, fresh explicit enable, automatic revalidation, commit/pause/resume, fresh restart sessions, sealed upgrade, corrupt/missing-state revocation, bounded locks, preemptive independent recovery, trial expiry, automatic non-sleep seal recovery and pending/short-sleep/pause/upgrade/restore wake boundaries")
     }
 

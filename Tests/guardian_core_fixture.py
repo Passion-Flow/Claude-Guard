@@ -215,7 +215,10 @@ struct GuardianTrust {
             arguments.append('--expect-vulnerable')
         if sys.argv[1:] in (['--restart-stale'], ['--restart-stale-baseline']):
             arguments.append('--stale-native-rules')
-        subprocess.run(arguments, check=True, timeout=150)
+        # The main fixture contains many separately bounded transitions. Its
+        # aggregate budget is not a control-response or protection deadline;
+        # preserve those native assertions while allowing slower hosted I/O.
+        subprocess.run(arguments, check=True, timeout=300)
     finally:
         for pid_file in [root / "runtime/active/pid", root / "lock-holder.pid"]:
             if not pid_file.exists():
