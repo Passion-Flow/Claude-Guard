@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build and run self-test
+        run: ./build.sh
+      - name: Run simulated guardian tests
+        run: /usr/bin/python3 -I Tests/guard_worker_fixture.py
+      - name: Check production observation cadence with bounded slow work
+        run: /usr/bin/python3 -I Tests/guard_worker_fixture.py --cadence
+      - name: Check concurrent health observation and cancellation
+        run: /usr/bin/python3 -I Tests/health_probe_fixture.py
+      - name: Check independent address continuity without extending admission
+        run: /usr/bin/python3 -I Tests/independent_health_fixture.py
+      - name: Check continuity provider resolution and cache isolation
+        run: /usr/bin/python3 -I Tests/continuity_resolution_fixture.py
+      - name: Check timely pending replies and actual authorization expiry
+        run: /usr/bin/python3 -I Tests/health_streaming_fixture.py
+      - name: Check independent scheduling for every healthy provider
+        run: /usr/bin/python3 -I Tests/health_scheduler_fixture.py
+      - name: Check final request completion and bounded retry decisions
+        run: /usr/bin/python3 -I Tests/health_retry_fixture.py
+      - name: Check trace operator loss across independent DNS expiry
+        run: /usr/bin/python3 -I Tests/provider_dependency_fixture.py
+      - name: Check evidence ordering and independent observation timestamps
+        run: /usr/bin/python3 -I Tests/evidence_transition_fixture.py
+      - name: Check evidence preparation before the kernel admission transaction
+        run: /usr/bin/python3 -I Tests/admission_transaction_fixture.py
+      - name: Check risk renewal scheduling against identity deadlines
+        run: /usr/bin/python3 -I Tests/risk_renewal_scheduling_fixture.py
+      - name: Check installed observation classification without system access
+        run: /usr/bin/python3 -I Tests/production_runtime_fixture.py
+      - name: Check installed fault controller safety without system access
+        run: /usr/bin/python3 -I Tests/installed_stability_fixture.py
+      - name: Check privileged control lifecycle without system changes
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py
+      - name: Check native observation and risk lease clocks
+        run: /usr/bin/python3 -I Tests/guardian_lease_fixture.py
+      - name: Check expired proof with a continuously fresh worker heartbeat
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --observation
+      - name: Check interrupted admission before the final UI publication
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --admitting
+      - name: Check native power and packet-writer boundaries without system changes
+        run: /usr/bin/python3 -I Tests/packet_fence_fixture.py
+      - name: Check watchdog timing without changing the system clock
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --clock
+      - name: Check failed worker replacement without host changes
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --restart
+      - name: Check failed replacement after uncertain filter writes
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --restart-stale
+      - name: Check automatic discovery without host changes
+        run: /usr/bin/python3 -I Tests/automatic_discovery_fixture.py
+      - name: Check sealed migration through actual discovery
+        run: /usr/bin/python3 -I Tests/guardian_core_fixture.py --migration
+      - name: Check installer lifecycle without installation
+        run: /usr/bin/python3 -I Tests/installer_fixture.py
+      - name: Check partial removal, native system cleanup and uninstall isolation
+        run: /usr/bin/python3 -I Tests/uninstall_fixture.py
+      - name: Check browser diagnostics without network access
+        run: node Tests/browser_diagnostics_test.js
+      - name: Check anonymous diagnostic headers and redirects on loopback
+        run: /usr/bin/python3 -I Tests/service_transport_fixture.py
+      - name: Check transport error redaction without network access
+        run: /usr/bin/python3 -I Tests/transport_privacy_fixture.py
+      - name: Check keyless worker admission and evidence cache
+        run: /usr/bin/python3 -I Tests/keyless_risk_fixture.py
+      - name: Check risk renewal with incomplete verified TLS responses
+        run: /usr/bin/python3 -I Tests/risk_transfer_fixture.py
+      - name: Check independent DNS and target share one TLS request window
+        run: /usr/bin/python3 -I Tests/continuity_budget_fixture.py
+      - name: Check localization and installer instructions
+        run: /usr/bin/python3 -I Tests/localization_fixture.py
+      - name: Check engineering harness without host changes
+        run: /usr/bin/python3 -I Tests/host_acceptance_fixture.py

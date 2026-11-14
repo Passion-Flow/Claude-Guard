@@ -1,0 +1,17 @@
+:root { color-scheme: light dark; --canvas: #faf8f4; --ink: #302f2b; --muted: #6e6a62; --accent: #a34e37; }
+@media (prefers-color-scheme: dark) {
+  :root { --canvas: #252421; --ink: #eee8dd; --muted: #b0a99e; --accent: #e6a78c; }
+}
+:root[data-theme="light"] { color-scheme: light; --canvas: #faf8f4; --ink: #302f2b; --muted: #6e6a62; --accent: #a34e37; }
+:root[data-theme="dark"] { color-scheme: dark; --canvas: #252421; --ink: #eee8dd; --muted: #b0a99e; --accent: #e6a78c; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font: 17px/1.65 -apple-system, BlinkMacSystemFont, sans-serif; }
+main { width: min(680px, 100%); margin: 10vh auto; padding: 32px; }
+.brand { font-size: 14px; letter-spacing: .03em; color: var(--muted); }
+h1 { font: 400 clamp(32px, 5vw, 45px)/1.2 Georgia, serif; margin: 22px 0; }
+p { white-space: pre-line; }
+button { padding: 12px 20px; margin: 12px 0; border: 1px solid var(--accent); border-radius: 10px; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+button:disabled { cursor: default; opacity: .5; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+#result { font-weight: 600; min-height: 2em; }
+.scope { color: var(--muted); font-size: 14px; border-top: 1px solid var(--muted); padding-top: 20px; margin-top: 32px; }

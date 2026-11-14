@@ -8,15 +8,15 @@ struct RecoveryApplication: App {
     var body: some Scene {
         WindowGroup(GuardText("Claude Guard Recovery")[language]) {
             RecoveryWindow(language: $language, appearance: $appearance)
-                .frame(minWidth: 490, minHeight: 285)
+                .frame(minWidth: 560, minHeight: 360)
                 .preferredColorScheme(appearance.scheme)
                 .environment(\.locale, language.locale)
         }
-        .defaultSize(width: 490, height: 285)
+        .defaultSize(width: 620, height: 380)
     }
 }
 
-private struct RecoveryWindow: View {
+struct RecoveryWindow: View {
     @Binding var language: GuardLanguage
     @Binding var appearance: GuardAppearance
     @Environment(\.colorScheme) private var colorScheme
@@ -32,11 +32,14 @@ private struct RecoveryWindow: View {
             Label(tr("Local network recovery"), systemImage: "shield.lefthalf.filled")
                 .font(.system(.title2, design: .serif).bold())
             Text(tr("Use the Mac administrator password to remove this session’s rules. This tool works offline."))
-            Text(tr("Close Claude before restoring. If the VPN is still disconnected, apps may connect directly."))
+            Text(tr("Close your apps before restoring. If the VPN is still disconnected, apps may connect directly."))
                 .foregroundStyle(palette.secondary)
             HStack {
                 Button(tr("Restore network…")) { confirmation = true }
                     .buttonStyle(GuardButton(palette: palette, primary: true))
+                    .disabled(working)
+                Button(tr("Uninstall Claude Guard…")) { openPackage("Uninstall") }
+                    .buttonStyle(GuardButton(palette: palette))
                     .disabled(working)
                 if working { ProgressView().controlSize(.small) }
             }
@@ -62,11 +65,19 @@ private struct RecoveryWindow: View {
         working = true
         result = nil
         Task {
-            let command = await Task.detached { Tools.admin(["stop"], background: false) }.value
+            let command = await Task.detached { GuardianClient.send(GuardianRequest(.restore), recovery: true) }.value
             working = false
             result = command.code == 0
                 ? GuardText("The Claude Guard rules are no longer active.")
-                : GuardText("Recovery did not complete. Retry or restart this Mac to clear the session rules.")
+                : GuardText("Recovery did not complete. Keep apps closed and open the matching offline recovery package.")
+            if command.code == 74 || command.code == 78 { openPackage("OfflineRecovery") }
+        }
+    }
+
+    private func openPackage(_ name: String) {
+        guard GuardMaintenance.openPackage(name) else {
+            result = GuardText("Open the matching recovery package from the installation image.")
+            return
         }
     }
 }

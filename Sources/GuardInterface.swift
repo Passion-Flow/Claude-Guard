@@ -15,6 +15,17 @@ struct GuardApplication: App {
                 .task { if controller.check == nil { controller.detect() } }
         }
         .defaultSize(width: 1060, height: 790)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button(GuardText("Uninstall Claude Guard…")[language]) {
+                    if !GuardMaintenance.openPackage("Uninstall") {
+                        let alert = NSAlert()
+                        alert.messageText = GuardText("Open the matching recovery package from the installation image.")[language]
+                        alert.runModal()
+                    }
+                }
+            }
+        }
 
         MenuBarExtra {
             GuardMenu(controller: controller, language: language)
@@ -86,25 +97,13 @@ struct GuardWindow: View {
         .foregroundStyle(palette.ink)
         .background(palette.canvas)
         .tint(palette.accent)
-        .alert(tr("Enable device protection"), isPresented: Binding(
-            get: { startTrial != nil }, set: { if !$0 { startTrial = nil } }
-        )) {
-            Button(tr("Continue and authorize")) {
-                if let trial = startTrial { controller.begin(trial: trial) }
-                startTrial = nil
-            }
-            Button(tr("Cancel"), role: .cancel) { startTrial = nil }
-        } message: {
-            Text(startTrial == true
-                 ? tr("Start the trial locally. macOS will ask for administrator access and reset existing connections. Blocking remains in effect when the trial expires.")
-                 : tr("Enable the approved route and recheck its exit. App traffic stays blocked when the VPN is unavailable."))
-        }
         .alert(tr("Restore network"), isPresented: $showRestore) {
             Button(tr("Remove session rules"), role: .destructive) { controller.restore() }
             Button(tr("Cancel"), role: .cancel) {}
         } message: {
-            Text(tr("Close Claude first. Removing protection can restore direct Internet access if the VPN is disconnected."))
+            Text(tr("Close your apps first. Removing protection can restore direct Internet access if the VPN is disconnected."))
         }
+
     }
 
     private var pageContent: some View {
@@ -152,7 +151,7 @@ struct GuardWindow: View {
             Rectangle().fill(palette.line).frame(height: 1)
             GuardDropdown(tr("Language"), selection: $language, choices: GuardLanguage.allCases, palette: palette) { $0.name }
             GuardDropdown(tr("Appearance"), selection: $appearance, choices: GuardAppearance.allCases, palette: palette) { $0.title(language) }
-            Text("v" + GuardPolicy.version + " · " + tr("Beta"))
+            Text("v" + GuardPolicy.version + " (" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–") + ") · " + tr("Private edition"))
                 .font(.caption.monospaced())
                 .foregroundStyle(palette.secondary)
         }
@@ -200,19 +199,46 @@ struct GuardWindow: View {
                     }
                     Text(controller.stateExplanation[language])
                         .font(.callout).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let notice = controller.notice {
+                        Label {
+                            Text(notice[language]).fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "info.circle")
+                        }
+                        .font(.callout).foregroundStyle(palette.secondary)
+                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(palette.highlight, in: RoundedRectangle(cornerRadius: 9))
+                    }
+                    if controller.rulesConfirmed && !controller.isOpen {
+                        Text(tr("Local TCP/IP connections pause until protection opens."))
+                            .font(.caption).foregroundStyle(palette.secondary)
+                    }
                     HStack {
                         metric(tr("Approved exit"), endpointDisplay(controller.status?.expected ?? controller.configuration.exit))
                         metric(tr("Observed exit"), endpointDisplay(controller.status?.observed))
                         metric(tr("Tunnel"), endpointDisplay(controller.status?.interface))
                     }
                     HStack(spacing: 9) {
-                        Button(tr("60-second trial")) { startTrial = true }
-                            .buttonStyle(GuardButton(palette: palette, primary: true))
-                            .disabled(controller.active || controller.busy || controller.detectingEndpoint)
-                        Button(controller.active ? tr("Continue protection") : tr("Enable last route")) { startTrial = false }
-                            .buttonStyle(GuardButton(palette: palette))
-                            .disabled(!controller.canGoLive)
+                        if controller.paused {
+                            Button(tr("Resume protection")) { controller.begin(trial: false) }
+                                .buttonStyle(GuardButton(palette: palette, primary: true)).disabled(controller.busy)
+                        } else if !controller.automaticEnabled {
+                            Button(tr("Enable automatic protection")) { controller.retryAutomaticSetup() }
+                                .buttonStyle(GuardButton(palette: palette, primary: true)).disabled(controller.busy || controller.automaticChecking)
+                        }
+                        if controller.automaticChecking { ProgressView().controlSize(.small) }
+                        Text(tr(controller.automaticChecking ? "Reading the active Shadowrocket profile…" : "Automatic detection and protection"))
+                            .font(.callout).foregroundStyle(palette.secondary)
+                        Spacer()
+                        Button(tr("Pause protection")) { controller.pauseProtection() }
+                            .buttonStyle(GuardButton(palette: palette)).disabled(!controller.mayPause)
+                    }
+                    HStack(spacing: 9) {
+                        Text(controller.persistent ? tr("Startup protection on") : tr("Startup monitoring enabled"))
+                            .font(.caption).foregroundStyle(palette.secondary)
                         Spacer(minLength: 0)
+                        Button(tr("Open offline recovery")) { controller.openRecovery() }
+                            .buttonStyle(GuardButton(palette: palette))
                         Button(tr("Restore network")) { showRestore = true }
                             .buttonStyle(GuardButton(palette: palette))
                             .disabled(!controller.mayRestore)
@@ -235,77 +261,46 @@ struct GuardWindow: View {
                     VStack(alignment: .leading, spacing: 12) {
                         sectionTitle(tr("Transport security"), "lock.shield")
                         Text(controller.currentTransport.title[language]).font(.system(.body, design: .monospaced))
-                        Text(tr("Evidence from the node link. Shadowrocket performs the actual handshake."))
+                        Text(tr("Only connection and encryption metadata is read. Shadowrocket performs the actual handshake."))
                             .font(.caption).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            configuration
-            card {
-                VStack(alignment: .leading, spacing: 11) {
-                    sectionTitle(tr("Open while protected"), "square.grid.2x2")
-                    HStack(spacing: 8) {
-                        ForEach(Channel.allCases) { channel in
-                            Button { controller.launch(channel) } label: {
-                                Label(channel.title[language], systemImage: channel.symbol)
-                            }
-                            .buttonStyle(GuardButton(palette: palette))
-                            .disabled(!controller.isOpen)
+                        Divider()
+                        Text(controller.riskStatus[language]).font(.callout.weight(.semibold))
+                        if let checkedAt = controller.status?.riskCheckedAt {
+                            Text(GuardCopy.date(checkedAt, language)).font(.caption).foregroundStyle(palette.secondary)
                         }
                     }
                 }
             }
-            Text(tr("The guardian continues after the window closes. Enable protection again after a Mac restart."))
+            automaticConfiguration
+            Text(controller.persistent
+                 ? tr("Startup protection is on. Restore network removes it.")
+                 : tr("Detection, stability checks, risk admission and recovery run automatically."))
                 .font(.caption).foregroundStyle(palette.secondary)
         }
     }
 
-    private var configuration: some View {
+    private var automaticConfiguration: some View {
         card {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    sectionTitle(tr("Node and detection"), "slider.horizontal.3")
+                    sectionTitle(tr("Automatic setup"), "sparkles")
                     Spacer()
-                    Button(controller.checking ? tr("Detecting…") : tr("Detect again")) { controller.detect() }
+                    Button(tr("Detect again")) { controller.retryAutomaticSetup() }
                         .buttonStyle(GuardButton(palette: palette))
-                        .disabled(controller.checking)
+                        .disabled(controller.busy || controller.automaticChecking || controller.paused)
                 }
-                if let check = controller.check {
-                    Text(check.vpnConnected
-                         ? GuardText("Shadowrocket detected · Default interface %1$@", .plain(check.defaultInterface))[language]
-                         : GuardText("Shadowrocket connection unconfirmed · Default interface %1$@", .plain(check.defaultInterface))[language])
-                    .font(.caption).foregroundStyle(palette.secondary)
+                Text(tr("Connect Shadowrocket once. The active profile, endpoint, tunnel and exit are detected without manual fields or a personal API key."))
+                    .font(.callout).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(tr("Risk admission requires a residential classification, score at most 10, clear risk flags and the approved region. Unavailable evidence keeps traffic blocked."))
+                    .font(.caption).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup(tr("Advanced preferences")) {
+                    GuardDropdown(tr("Approved exit region"), selection: Binding(
+                        get: { controller.configuration.approvedRegion ?? "US" },
+                        set: { controller.configuration.approvedRegion = $0 }
+                    ), choices: GuardRiskPolicy.regions, palette: palette) { region in
+                        Locale(identifier: language == .chinese ? "zh_Hans" : "en").localizedString(forRegionCode: region) ?? region
+                    }.disabled(controller.active || controller.automaticChecking)
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 12) {
-                        field(tr("Node address"), text: $controller.configuration.peer)
-                        field(tr("Node port"), text: $controller.configuration.port).frame(width: 110)
-                        GuardDropdown(tr("Transport"), selection: $controller.configuration.transport,
-                                      choices: ["tcp", "udp"], palette: palette) { $0.uppercased() }
-                        .frame(width: 150)
-                    }
-                    HStack(spacing: 12) {
-                        field(tr("Approved exit (defaults to node)"), text: $controller.configuration.expected)
-                        GuardDropdown(tr("Tunnel"), selection: $controller.configuration.interface,
-                                      choices: [""] + tunnelChoices, palette: palette) { $0.isEmpty ? tr("Select") : $0 }
-                        .frame(width: 190)
-                    }
-                    HStack(spacing: 8) {
-                        Button(controller.detectingEndpoint ? tr("Detecting…") : tr("Detect port and protocol")) {
-                            controller.detectEndpoint()
-                        }
-                        .buttonStyle(GuardButton(palette: palette))
-                        .disabled(controller.detectingEndpoint)
-                        Button(tr("Read node from clipboard")) { controller.importNode() }
-                            .buttonStyle(GuardButton(palette: palette))
-                        if !controller.endpointCandidates.isEmpty {
-                            GuardDropdown(tr("Select connection"), choices: controller.endpointCandidates,
-                                          palette: palette, label: { $0.label }, onSelect: controller.useEndpoint)
-                                .frame(minWidth: 130, maxWidth: 205)
-                        }
-                    }
-                }
-                .disabled(controller.active || controller.busy)
             }
         }
     }
@@ -314,7 +309,7 @@ struct GuardWindow: View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(spacing: 9) {
                 pill(controller.stateTitle[language], color: tone)
-                Text(tr("Policy state · Verify on the target Mac"))
+                Text(tr("Policy state · Evidence scope"))
                     .font(.caption).foregroundStyle(palette.secondary)
                 Spacer()
             }
@@ -330,9 +325,19 @@ struct GuardWindow: View {
             layer(4, "checkmark.circle", tr("Exit and stability"), tr("Release gate"),
                   tr("Six consecutive exit checks span at least 15 seconds on the same tunnel and visible route. Failures or changes restart the window."),
                   tr("Primary and backup HTTPS probes"))
-            layer(5, "macwindow.on.rectangle", tr("App traffic"), tr("Device-wide"),
+            layer(5, "checkmark.shield", tr("Risk admission"), tr("Required provider evidence"),
+                  tr("The approved region, residential classification, low score and clear risk flags are required. Missing or expired evidence keeps apps blocked."),
+                  controller.riskStatus[language])
+            layer(6, "macwindow.on.rectangle", tr("App traffic"), tr("Device-wide"),
                   tr("The same rule covers browsers, desktop apps, VS Code, and Terminal. A wrong exit or disconnect blocks traffic again."),
                   tr("Runtime filtering · No payload logging"))
+            layer(7, "arrow.clockwise.circle", tr("Guardian and recovery"), tr("System supervision"),
+                  tr("The system guardian retains approved configuration, repairs damaged rules and starts fresh validation after recovery. Offline restoration remains a separate local action."),
+                  tr("Restart never reuses a previous exit observation"))
+            ServiceDiagnosticsCard(controller: controller, diagnostics: controller.serviceDiagnostics,
+                                   language: language, palette: palette)
+            BrowserDiagnosticsCard(controller: controller, diagnostics: controller.browserDiagnostics,
+                                   language: language, appearance: appearance, palette: palette)
             Text(tr("The outer connection still uses the local ISP. This view shows rule state and exit probes. Packet-level verification is performed on the target Mac."))
                 .font(.caption).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
         }
@@ -369,7 +374,7 @@ struct GuardWindow: View {
                         .buttonStyle(GuardButton(palette: palette, primary: true))
                 }
                 if controller.events.isEmpty {
-                    Text(tr("Run detection or a trial to record events here."))
+                    Text(tr("Detection and protection events appear here automatically."))
                         .foregroundStyle(palette.secondary)
                 }
                 ForEach(controller.events) { event in
@@ -420,18 +425,22 @@ struct GuardWindow: View {
     private func field(_ title: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(.caption).foregroundStyle(palette.secondary)
-            if controller.active || demo {
-                Text(text.wrappedValue.isEmpty ? "—" : text.wrappedValue)
-                    .font(.system(.callout, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(palette.canvas, in: RoundedRectangle(cornerRadius: 5))
-                    .accessibilityLabel(title)
-                    .accessibilityValue(text.wrappedValue)
-            } else {
-                TextField(title, text: text).textFieldStyle(.roundedBorder).accessibilityLabel(title)
+            Group {
+                if controller.active || demo {
+                    Text(text.wrappedValue.isEmpty ? "—" : text.wrappedValue)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(title)
+                        .accessibilityValue(text.wrappedValue)
+                } else {
+                    TextField("", text: text).textFieldStyle(.plain).accessibilityLabel(title)
+                }
             }
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(palette.line))
         }
     }
 
@@ -440,6 +449,95 @@ struct GuardWindow: View {
             .foregroundStyle(color)
             .padding(.horizontal, 8).padding(.vertical, 5)
             .background(color.opacity(0.11), in: Capsule())
+    }
+}
+
+struct ServiceDiagnosticsCard: View {
+    @ObservedObject var controller: GuardController
+    @ObservedObject var diagnostics: ServiceDiagnostics
+    let language: GuardLanguage
+    let palette: GuardPalette
+
+    private func tr(_ key: String) -> String { GuardText(key)[language] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                Label(tr("Anonymous service path"), systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button(diagnostics.checking ? tr("Checking…") : tr("Check service path")) {
+                    if let status = controller.status { diagnostics.start(status) }
+                }
+                .buttonStyle(GuardButton(palette: palette))
+                .disabled(!controller.isOpen || controller.status?.mode != "live" || controller.busy || diagnostics.checking)
+            }
+            Text(tr("Service path scope")).font(.caption).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(diagnostics.results) { result in
+                Text(result.id + " · " + result.outcome.title[language]).font(.callout)
+            }
+            if let checkedAt = diagnostics.checkedAt {
+                Text(GuardCopy.date(checkedAt, language)).font(.caption).foregroundStyle(palette.secondary)
+            }
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(palette.line))
+    }
+}
+
+struct BrowserDiagnosticsCard: View {
+    @ObservedObject var controller: GuardController
+    @ObservedObject var diagnostics: BrowserDiagnostics
+    let language: GuardLanguage
+    let appearance: GuardAppearance
+    let palette: GuardPalette
+
+    private func tr(_ key: String) -> String { GuardText(key)[language] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                Label(tr("Browser network check"), systemImage: "network")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button(tr("Open browser check")) {
+                    controller.openBrowserDiagnostics(language: language, appearance: appearance)
+                }
+                .buttonStyle(GuardButton(palette: palette))
+                .disabled(!controller.isOpen || controller.status?.mode != "live" || controller.busy)
+                if diagnostics.running {
+                    Button(tr("Close browser check")) { diagnostics.stop() }
+                        .buttonStyle(GuardButton(palette: palette))
+                }
+            }
+            Text(tr("Browser test scope")).font(.caption).foregroundStyle(palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(tr("Enable continuous protection before starting a browser check."))
+                .font(.caption).foregroundStyle(palette.secondary)
+            if let evidence = diagnostics.evidence {
+                Text(evidence.summary[language]).font(.callout.weight(.semibold))
+                Text(GuardCopy.date(evidence.checkedAt, language)).font(.caption).foregroundStyle(palette.secondary)
+            } else if let error = diagnostics.error {
+                Text(error[language]).font(.callout).foregroundStyle(palette.caution)
+            } else {
+                Text(tr("Browser evidence unavailable")).font(.callout).foregroundStyle(palette.secondary)
+            }
+            Divider()
+            Text(tr("External diagnostic sites use their own scoring methods."))
+                .font(.caption).foregroundStyle(palette.secondary)
+            HStack(spacing: 16) {
+                Button("Net.Coffee") { controller.openDiagnosticSite(.netCoffee) }
+                Button("fuck-claude.com") { controller.openDiagnosticSite(.browserScore) }
+            }
+            .buttonStyle(GuardButton(palette: palette))
+            .font(.callout)
+            .disabled(!controller.isOpen || controller.status?.mode != "live" || controller.busy)
+        }
+        .padding(17)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(palette.line))
     }
 }
 

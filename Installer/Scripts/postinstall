@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C
+[ "$(/usr/bin/id -u)" = 0 ] || exit 77
+[ "${3:-/}" = / ] || exit 1
+directory=/Library/PrivilegedHelperTools/org.claudeguard
+/usr/sbin/chown root:wheel "$directory" "$directory/GuardDaemon" "$directory/GuardOfflineRecovery" "$directory/install-trust-template.json"
+/bin/chmod 0755 "$directory" "$directory/GuardDaemon" "$directory/GuardOfflineRecovery"
+/bin/chmod 0644 "$directory/install-trust-template.json"
+for label in org.claudeguard.daemon org.claudeguard.offline-recovery; do
+  /usr/sbin/chown root:wheel "/Library/LaunchDaemons/$label.plist"
+  /bin/chmod 0644 "/Library/LaunchDaemons/$label.plist"
+done
+/bin/mkdir -p /Library/LaunchAgents
+/usr/sbin/chown root:wheel /Library/LaunchAgents/org.claudeguard.mac.plist
+/bin/chmod 0644 /Library/LaunchAgents/org.claudeguard.mac.plist
+"$directory/GuardDaemon" --initialize
+/bin/launchctl bootstrap system /Library/LaunchDaemons/org.claudeguard.daemon.plist
+/bin/launchctl bootstrap system /Library/LaunchDaemons/org.claudeguard.offline-recovery.plist
+/bin/launchctl print system/org.claudeguard.daemon >/dev/null
+/bin/launchctl print system/org.claudeguard.offline-recovery >/dev/null
+console_uid=$(/usr/bin/stat -f '%u' /dev/console)
+case "$console_uid" in ''|*[!0-9]*) exit 1;; esac
+if [ "$console_uid" -ge 501 ]; then
+  /bin/launchctl bootstrap "gui/$console_uid" /Library/LaunchAgents/org.claudeguard.mac.plist
+fi
+exit 0

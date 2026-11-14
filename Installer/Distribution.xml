@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>Claude Guard</title>
+  <options customize="never" hostArchitectures="arm64,x86_64" rootVolumeOnly="true"/>
+  <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
+  <welcome file="Welcome.html" mime-type="text/html"/>
+  <conclusion file="Conclusion.html" mime-type="text/html"/>
+  <allowed-os-versions><os-version min="13.0"/></allowed-os-versions>
+  <choices-outline><line choice="default"/></choices-outline>
+  <choice id="default" visible="false"><pkg-ref id="org.claudeguard.private"/></choice>
+  <pkg-ref id="org.claudeguard.private" version="1.0.1" onConclusion="none">ClaudeGuardComponent.pkg</pkg-ref>
+  <pkg-ref id="org.claudeguard.private">
+    <must-close><app id="org.claudeguard.mac"/></must-close>
+  </pkg-ref>
+</installer-gui-script>

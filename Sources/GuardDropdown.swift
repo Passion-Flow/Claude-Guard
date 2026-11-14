@@ -76,10 +76,38 @@ private struct GuardDropdownOptions<Value: Hashable>: View {
     let onSelect: (Value) -> Void
     let onDismiss: () -> Void
     @FocusState private var focused: Value?
+    @FocusState private var searchFocused: Bool
+    @State private var search = ""
+    @Environment(\.locale) private var locale
+
+    private var filtered: [Value] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? choices : choices.filter {
+            label($0).localizedCaseInsensitiveContains(query) || String(describing: $0).localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func tr(_ key: String) -> String {
+        GuardText(key)[locale.identifier.hasPrefix("zh") ? .chinese : .english]
+    }
 
     var body: some View {
-        Group {
-            if choices.count > 7 {
+        VStack(spacing: 6) {
+            if choices.count > 12 {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(palette.secondary)
+                    TextField(tr("Search options"), text: $search)
+                        .textFieldStyle(.plain).focused($searchFocused)
+                        .onSubmit { if let first = filtered.first { onSelect(first) } }
+                }
+                .padding(8)
+                .background(palette.canvas, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(palette.line))
+            }
+            if filtered.isEmpty {
+                Text(tr("No matching options")).foregroundStyle(palette.secondary).padding(10)
+            }
+            else if choices.count > 7 {
                 ScrollViewReader { proxy in
                     ScrollView { rows }.frame(height: 238)
                         .onChange(of: focused) { value in
@@ -94,7 +122,10 @@ private struct GuardDropdownOptions<Value: Hashable>: View {
         .frame(minWidth: 158, idealWidth: 196, maxWidth: 285)
         .foregroundStyle(palette.ink)
         .background(palette.surface)
-        .onAppear { focused = selected ?? choices.first }
+        .onAppear {
+            if choices.count > 12 { searchFocused = true }
+            else { focused = selected ?? choices.first }
+        }
         .onExitCommand(perform: onDismiss)
         .onMoveCommand { direction in
             switch direction {
@@ -107,7 +138,7 @@ private struct GuardDropdownOptions<Value: Hashable>: View {
 
     private var rows: some View {
         VStack(spacing: 3) {
-            ForEach(choices, id: \.self) { choice in
+            ForEach(filtered, id: \.self) { choice in
                 Button { onSelect(choice) } label: {
                     HStack(spacing: 11) {
                         Text(label(choice)).font(.system(size: 12, weight: choice == selected ? .semibold : .regular))
@@ -124,6 +155,7 @@ private struct GuardDropdownOptions<Value: Hashable>: View {
                 .buttonStyle(DropdownOptionStyle(palette: palette, focused: focused == choice))
                 .focusable()
                 .focused($focused, equals: choice)
+                .keyboardShortcut(focused == choice && !searchFocused ? KeyboardShortcut(.return, modifiers: []) : nil)
                 .accessibilityAddTraits(choice == selected ? .isSelected : [])
                 .id(choice)
             }
@@ -131,11 +163,12 @@ private struct GuardDropdownOptions<Value: Hashable>: View {
     }
 
     private func move(by delta: Int) {
-        guard let start = focused.flatMap({ choices.firstIndex(of: $0) }) else {
-            focused = choices.first
+        guard let start = focused.flatMap({ filtered.firstIndex(of: $0) }) else {
+            focused = filtered.first
             return
         }
-        focused = choices[min(max(start + delta, 0), choices.count - 1)]
+        searchFocused = false
+        focused = filtered[min(max(start + delta, 0), filtered.count - 1)]
     }
 }
 

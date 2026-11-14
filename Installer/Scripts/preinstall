@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C
+[ "$(/usr/bin/id -u)" = 0 ] || exit 77
+[ "${3:-/}" = / ] || { echo "Choose the startup volume for this installation." >&2; exit 1; }
+if [ -f /Library/LaunchDaemons/org.claudeguard.guardian.plist ]; then
+  echo "Restore networking with the earlier Guard Recovery app before installing this version." >&2
+  exit 1
+fi
+helper=/Library/PrivilegedHelperTools/org.claudeguard/GuardDaemon
+if [ -f /Library/PrivilegedHelperTools/org.claudeguard/install-trust.json ]; then
+  [ -x "$helper" ] || { echo "Repair the existing guardian installation before upgrading." >&2; exit 1; }
+  "$helper" --prepare-upgrade
+  for label in org.claudeguard.daemon org.claudeguard.offline-recovery; do
+    /bin/launchctl bootout "system/$label" >/dev/null 2>&1 || true
+    if /bin/launchctl print "system/$label" >/dev/null 2>&1; then
+      echo "The previous guardian could not be stopped safely." >&2
+      exit 1
+    fi
+  done
+fi
+console_uid=$(/usr/bin/stat -f '%u' /dev/console)
+case "$console_uid" in ''|*[!0-9]*) exit 1;; esac
+if [ "$console_uid" -ge 501 ]; then
+  /bin/launchctl bootout "gui/$console_uid/org.claudeguard.mac" >/dev/null 2>&1 || true
+fi
+exit 0

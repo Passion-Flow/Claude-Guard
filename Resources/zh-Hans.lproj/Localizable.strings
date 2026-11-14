@@ -1,5 +1,4 @@
 "  Exit " = "  出口 ";
-"%1$@ is not installed." = "没有找到 %1$@。";
 "60-second trial" = "60 秒试运行";
 "A local network detection check was recorded." = "已记录一次本机网络检测。";
 "A probe timed out. The original tunnel is still connected and direct traffic remains blocked while the check retries." = "探测短暂超时。原隧道仍连接，继续拦截直连并立即复查。";
@@ -9,7 +8,7 @@
 "Administrator authorization did not complete." = "管理员授权未完成。";
 "Administrator authorization was not granted." = "未能获得管理员授权。";
 "Allow supported tunnel traffic only" = "仅放行隧道内受支持的流量";
-"An earlier policy is active. Close Claude, restore networking locally, then enable the new policy." = "正在运行旧版规则。关闭 Claude 后在本机恢复网络，再启用新版保护。";
+"An earlier policy is active. Close your apps, restore networking locally, then enable the new policy." = "正在运行旧版规则。关闭应用后在本机恢复网络，再启用新版保护。";
 "An event was recorded by an earlier version. Switch to Chinese to read the original note." = "此事件来自早期版本。切换至中文可阅读原始记录。";
 "App traffic" = "普通应用";
 "Appearance" = "外观";
@@ -18,6 +17,7 @@
 "Approved exit (defaults to node)" = "批准出口（默认与节点相同）";
 "Approved tunnel" = "批准的隧道";
 "Beta" = "测试版";
+"Private edition" = "自用版";
 "Cancel" = "取消";
 "Certificate verification disabled" = "证书验证已关闭";
 "Checking" = "正在校验";
@@ -26,15 +26,12 @@
 "Claude Guard Report.txt" = "Claude Guard 报告.txt";
 "Claude Guard quick panel" = "Claude Guard 快捷面板";
 "Claude Guard session report" = "Claude Guard 会话报告";
-"Claude desktop" = "Claude 桌面 App";
-"Claude web" = "Claude 网页";
-"Close Claude before restoring. If the VPN is still disconnected, apps may connect directly." = "恢复前先关闭 Claude。如果 VPN 仍断开，应用可能直接联网。";
-"Close Claude first. Removing protection can restore direct Internet access if the VPN is disconnected." = "先关闭 Claude。撤销保护后，如果 VPN 仍断开，应用可能直接联网。";
+"Close your apps before restoring. If the VPN is still disconnected, apps may connect directly." = "恢复前先关闭应用。如果 VPN 仍断开，应用可能直接联网。";
+"Close your apps first. Removing protection can restore direct Internet access if the VPN is disconnected." = "先关闭应用。撤销保护后，如果 VPN 仍断开，应用可能直接联网。";
 "Connect the node in Shadowrocket, then detect and select its tunnel." = "请先在 Shadowrocket 连上节点，再检测并选定系统隧道。";
 "Continue and authorize" = "继续并授权";
 "Continue protection" = "持续保护";
 "Copy a supported single-node link from 3x-ui or detect an active connection." = "请从 3x-ui 复制受支持的单节点链接，或识别活动连接。";
-"Could not open %1$@." = "未能打开 %1$@。";
 "Could not write the report. Choose another location." = "报告写入失败，请换一个位置。";
 "Dark" = "深色";
 "Default interface %1$@. Tunnel interfaces found: %2$@." = "默认接口 %1$@，发现 %2$@ 个隧道。";
@@ -82,7 +79,6 @@
 "Not reviewed" = "尚未核对";
 "Observed exit" = "最近观测";
 "Open Claude Guard" = "打开 Claude Guard";
-"Open while protected" = "受保护时打开";
 "Outer transport" = "外层传输";
 "Overview" = "总览";
 "Physical interface" = "物理网卡";
@@ -124,7 +120,6 @@
 "Simplified Chinese" = "简体中文";
 "Six checks passed over at least 15 seconds. Apps may use the tunnel." = "已跨至少 15 秒通过 6 次检查，应用可经隧道联网。";
 "Six consecutive exit checks span at least 15 seconds on the same tunnel and visible route. Failures or changes restart the window." = "在同一隧道和可见路由上连续通过 6 次出口检查，覆盖至少 15 秒。故障或变更会重新计数。";
-"Start the trial locally. macOS will ask for administrator access and reset existing connections. Blocking remains in effect when the trial expires." = "请在本机启动试运行。系统会请求管理员授权并重置现有连接。试运行到期后仍保持拦截。";
 "Status " = "当前状态 ";
 "Status updated." = "状态已更新。";
 "Stopped" = "已停止";
@@ -133,7 +128,6 @@
 "System routes could not be read. App traffic remains blocked." = "暂时无法读取系统路由，普通应用保持断网。";
 "System rules changed" = "系统规则已变化";
 "TLS declared" = "配置声明 TLS";
-"Terminal" = "终端";
 "The Claude Guard rules are no longer active." = "Claude Guard 的规则已解除。";
 "The Claude Guard rules were removed." = "已撤销 Claude Guard 的规则。";
 "The VPN is connected. App traffic stays blocked while the tunnel and approved exit are being verified." = "VPN 已连接。正在验证同一隧道和批准出口，应用流量仍被拦截。";
@@ -159,7 +153,7 @@
 "The trial ended and the original rules were restored." = "试运行到期，已恢复原有规则。";
 "The trial expired and traffic remains blocked. Continue protection or explicitly restore networking on this Mac." = "试运行到期，仍保持断网。可继续保护，或在本机明确恢复网络。";
 "The tunnel disappeared. Restore networking and run detection again." = "系统隧道已消失。请恢复网络后重新检测。";
-"This beta cannot validate the current packet-filter layout. Protection was not enabled." = "当前系统过滤规则布局不受此试用版支持，未启用保护。";
+"This edition cannot validate the current packet-filter layout. Protection was not enabled." = "当前版本无法验证系统过滤规则的布局，未启用保护。";
 "This removes the Claude Guard rules. Check the VPN connection separately." = "此操作撤销 Claude Guard 的规则。VPN 连接需要另行确认。";
 "Traffic blocked" = "已熔断";
 "Traffic path" = "链路防护";
@@ -173,7 +167,6 @@
 "Upload" = "上传";
 "Use a node link with authenticated encryption and certificate verification enabled." = "请使用启用认证加密与证书验证的节点链接。";
 "Use the Mac administrator password to remove this session’s rules. This tool works offline." = "使用 Mac 管理员密码撤销本次规则。此工具可以离线使用。";
-"VS Code" = "VS Code";
 "Verify the exit before allowing apps to connect." = "先验证出口，再放行整机应用。";
 "Verifying tunnel stability" = "VPN 稳定性验证中";
 "Waiting for the original Shadowrocket service. App traffic remains blocked." = "正在等待原 Shadowrocket 服务连接。普通流量保持关闭。";
@@ -181,3 +174,149 @@
 "Working" = "正在处理";
 "macOS could not load or verify the protection rules." = "系统拒绝加载或验证保护规则。";
 "macOS was asked to reconnect the original Shadowrocket service. Waiting for validation." = "已向 macOS 请求重连原 Shadowrocket 服务，等待验证。";
+"Start the trial locally. macOS will ask for administrator access and reset existing connections. If you do not select Continue protection before the trial ends, the rules are removed and direct access returns." = "请在本机开始试运行。系统将请求管理员授权，并重置现有连接。如果试运行结束前未点「持续保护」，规则会被撤销，应用将恢复直连。";
+"Exit checks are unavailable, but the tunnel still reaches the Internet. Direct traffic remains blocked." = "出口检查暂不可用，但隧道仍可访问互联网。直连流量继续被拦截。";
+"Enable protection at startup" = "启用开机保护";
+"After a restart, all traffic stays blocked until this route is verified, with no password prompt. If the VPN cannot connect, use Claude Guard Recovery on this Mac. Restore network removes this setting." = "重启后无需输入密码，所有流量会一直被拦截，直到此线路通过验证。如果 VPN 无法连接，请在本机使用 Claude Guard Recovery。点「恢复网络」会移除此设置。";
+"Keep after restart" = "重启后继续保护";
+"Startup protection on" = "开机保护已开启";
+"Startup protection is on. Restore network removes it." = "开机保护已开启。点「恢复网络」可移除。";
+"Startup protection could not be enabled. The current rules are still in place." = "无法启用开机保护。当前规则仍然有效。";
+"Remote admin IPv4 for SSH (optional)" = "SSH 远程管理 IPv4（可选）";
+"Enter a valid numeric admin address, or leave it empty." = "请输入有效的数字管理地址，或留空。";
+"Browser network check" = "浏览器网络检查";
+"Run browser check" = "开始浏览器检查";
+"Checking browser…" = "正在检查浏览器…";
+"Browser evidence unavailable" = "浏览器结果尚未验证";
+"Browser exit differs" = "浏览器观测到其他出口";
+"Public host address exposed" = "浏览器暴露了公网主机地址";
+"Browser exit sample matched" = "本次浏览器出口样本符合预期";
+"Browser test notice" = "请在实际使用的浏览器中运行。每次检查都会新建 WebRTC 连接，通过当前网络策略访问 Cloudflare STUN。该服务可以看到检测出口。无需摄像头或麦克风权限。本地检测页面五分钟后失效。";
+"Browser test scope" = "这里只记录一次浏览器观测。局域网和 mDNS 地址与公网暴露分别处理，中继地址需要单独核对路径。防护锁定时本地 TCP/IP 同样被阻断，本地检测页面可能需等放行后才能继续。空结果或受限结果仍为未验证。故障期间是否持续拦截需要抓包验收。";
+"Local TCP/IP connections pause until protection opens." = "防护放行前，本地 TCP/IP 连接也会暂停。";
+"The local browser test could not start." = "本地浏览器检查未能启动。";
+"Open browser check" = "打开浏览器检查";
+"Close browser check" = "关闭浏览器检查";
+"External diagnostic sites use their own scoring methods." = "外部检测网站使用各自的评分方法。打开后，其运营方可以看到检测出口。";
+"System routing differs from the approved tunnel. App traffic remains blocked." = "系统路由与批准的隧道不一致。应用流量继续拦截。";
+"The approved exit observation expired. App traffic remains blocked while validation restarts." = "批准出口的观测结果已过期。重新验证期间继续拦截应用流量。";
+"Enable continuous protection before starting a browser check." = "请先启用持续保护，再运行浏览器检查。恢复直连前请关闭检测页面。";
+"Select the approved exit region." = "请选择批准的出口地区。";
+"Install the system guardian" = "请安装系统守护组件";
+"Protection paused" = "保护已暂停放行";
+"Open the private installer to install the system guardian. macOS asks for administrator authorization." = "请打开自用安装包，安装系统守护组件，并按 macOS 提示完成管理员授权。";
+"Import a node link again before starting a new trial." = "开始新的试运行前，请重新导入节点链接。";
+"Enter an authorized risk-service key." = "请填写已获授权的风险检测服务密钥。";
+"The guardian did not confirm activation." = "守护组件未确认启用结果。";
+"Install the matching private application and system guardian package." = "请安装版本匹配的自用应用与系统守护组件。";
+"Restore the earlier version before installing this guardian." = "请先使用旧版恢复工具解除原有保护，再安装当前守护组件。";
+"The guardian rejected the route, node declaration or risk key." = "守护组件拒绝了线路、节点声明或风险服务密钥。";
+"The guardian did not confirm this operation. Check status before retrying." = "守护组件未确认操作结果。请先检查状态，再决定是否重试。";
+"Checking fresh exit risk evidence." = "正在检查最新的出口风险证据。";
+"The exit did not meet the strict risk policy. App traffic remains blocked." = "出口未达到严格风险条件，应用流量继续拦截。";
+"Required risk evidence is unavailable. App traffic remains blocked." = "必要的风险证据不可用，应用流量继续拦截。";
+"Protection is paused. Ordinary traffic stays blocked. Resume protection or restore networking locally." = "已暂停放行，普通流量仍被拦截。可恢复保护，或在本机解除网络限制。";
+"Risk check passed" = "风险检查已通过";
+"Risk refresh pending" = "风险数据等待刷新";
+"Risk refresh is pending. The original accepted evidence remains valid only until its existing expiry." = "风险数据正在等待刷新。原有已通过的证据仅在原定到期时间前有效。";
+"The local daily risk-query allowance is exhausted. Fresh evidence is required before release." = "本机今日风险查询额度已用完。取得有效的新证据后才能放行。";
+"The saved risk-query state could not be validated. App traffic remains blocked." = "无法验证已保存的风险查询状态，应用流量保持拦截。";
+"Risk check in progress" = "正在检查风险";
+"Risk policy denied release" = "风险策略拒绝放行";
+"Risk evidence unavailable" = "风险证据尚未确认";
+"An independent HTTPS provider verified the approved exit. Accepted region and risk evidence keep their original expiry." = "独立 HTTPS 服务已核对批准的出口。已接受的地区和风险证据仍按原有效期到期。";
+"Resume protection" = "恢复保护";
+"Pause protection" = "暂停放行";
+"Startup protection follows confirmation." = "确认持续保护后自动启用开机恢复。";
+"Open offline recovery" = "打开离线恢复";
+"Approved exit region" = "批准的出口地区";
+"IPQS service key" = "IPQS 服务密钥";
+"The strict policy requires fresh residential risk evidence. The service key is kept in protected local storage." = "严格策略要求最新的住宅线路风险证据。服务密钥保存在本机受保护的存储中。";
+"Uninstall Claude Guard…" = "卸载 Claude Guard…";
+"Open the matching recovery package from the installation image." = "请从安装镜像打开版本匹配的恢复安装包。";
+
+"Tailscale SSH peer (optional)" = "Tailscale SSH 对端（可选）";
+"Managed by system guardian" = "由系统守护程序管理";
+"Confirm the trial to enable automatic protection after restart." = "确认试运行后，自动启用重启后的防护。";
+"Anonymous service exit matched" = "匿名服务出口一致";
+"Anonymous service exit differs" = "匿名服务出口不符";
+"Anonymous service evidence unavailable" = "匿名服务证据未验证";
+"Anonymous service path" = "匿名服务链路";
+"Check service path" = "检查服务链路";
+"Checking…" = "正在检查…";
+"Last risk check" = "最近风险检查";
+"Search options" = "搜索选项";
+"No matching options" = "没有匹配的选项";
+"Service path scope" = "点击后向 claude.ai 和 api.anthropic.com 的匿名追踪端点发出请求，不携带账号 Cookie。结果仅代表一次原生 HTTPS 观测，五分钟后失效，不能用于放行。端点缺失或受限时仍属未验证，不能证明已登录浏览器或 API 请求的实际链路。";
+"Risk admission" = "风险准入";
+"Required provider evidence" = "必要的服务商证据";
+"The approved region, residential classification, low score and clear risk flags are required. Missing or expired evidence keeps apps blocked." = "必须符合批准地区、住宅线路、低风险评分及各项风险标记要求。证据缺失或过期时，应用仍被拦截。";
+"Guardian and recovery" = "守护与恢复";
+"System supervision" = "系统后台守护";
+"The system guardian retains approved configuration, repairs damaged rules and starts fresh validation after recovery. Offline restoration remains a separate local action." = "系统守护程序保存批准的配置、修复损坏的规则，并在恢复后重新验证。离线恢复网络需在本机单独操作。";
+"Restart never reuses a previous exit observation" = "重启后重新获取出口证据";
+"Recovery did not complete. Keep apps closed and open the matching offline recovery package." = "恢复未完成。请保持应用关闭，并打开版本匹配的离线恢复安装包。";
+"Use a single Tailscale IPv4 peer address, or leave it empty." = "请填写单个 Tailscale 对端的 IPv4 地址，或留空。";
+"Only SSH to this private peer is allowed on its tunnel after protection opens. Tailscale transport must use the approved VPN; local direct paths remain blocked." = "防护放行后，仅允许通过私有隧道向此对端发起 SSH。Tailscale 的外层连接必须经过已批准的 VPN，本地直连路径仍被拦截。";
+
+"VMess AEAD profile" = "VMess AEAD 配置";
+"Shadowsocks AEAD profile" = "Shadowsocks AEAD 配置";
+"Waiting for a supported, connected Shadowrocket profile. No protection is active yet." = "正在等待受支持且已连接的 Shadowrocket 配置。防护尚未启用。";
+"Shadowrocket is checked automatically. Apps are released only after tunnel stability and risk checks pass." = "自动检查 Shadowrocket；隧道稳定且风险检查通过后才放行应用。";
+"Enable automatic protection" = "启用自动防护";
+"Reading the active Shadowrocket profile…" = "正在读取 Shadowrocket 当前配置…";
+"Automatic detection and protection" = "自动检测与防护";
+"Startup monitoring enabled" = "已启用登录自动监测";
+"Detection, stability checks, risk admission and recovery run automatically." = "检测、稳定性验证、风险准入和恢复均自动运行。";
+"Only connection and encryption metadata is read. Shadowrocket performs the actual handshake." = "仅读取连接及加密类型信息；实际握手由 Shadowrocket 完成。";
+"Automatic setup" = "自动设置";
+"Connect Shadowrocket once. The active profile, endpoint, tunnel and exit are detected without manual fields or a personal API key." = "连接 Shadowrocket 后自动识别当前配置、节点、隧道和出口，无需填写参数或个人 API 密钥。";
+"Risk admission requires a residential classification, score at most 10, clear risk flags and the approved region. Unavailable evidence keeps traffic blocked." = "风险准入要求住宅线路、评分不高于 10、所有风险标记为否且地区获批。证据不可用时保持拦截。";
+"Advanced preferences" = "高级偏好设置";
+
+"Policy state · Evidence scope" = "策略状态 · 证据范围";
+"Detection and protection events appear here automatically." = "检测与防护事件将自动显示在这里。";
+
+"Set Shadowrocket Global Routing to Proxy. Config and Direct modes are not admitted automatically." = "请将 Shadowrocket 的全局路由切换为 Proxy；Config 和 Direct 模式不会自动准入。";
+
+"Use a dedicated node profile with a numeric IPv4 server address. Hostname bootstrap cannot recover with outside DNS blocked." = "请使用服务器地址为 IPv4 数字地址的独享节点配置。外部 DNS 被拦截时，域名节点无法保证自动重连。";
+
+"Allow read access" = "允许读取";
+"Allow Claude Guard to read connection metadata from this Shadowrocket folder. Passwords and subscription payloads are not decoded." = "允许 Claude Guard 读取此 Shadowrocket 文件夹中的连接信息；不会解码密码和订阅内容。";
+
+"Allow read access to the Shadowrocket configuration folder, then detect again." = "请允许读取 Shadowrocket 配置文件夹，然后重新检测。";
+
+"The Shadowrocket configuration format could not be validated. Protection setup is blocked." = "无法验证 Shadowrocket 配置格式，防护设置已停止。";
+
+"The selected Shadowrocket profile is ambiguous. Protection setup is blocked." = "无法唯一确定当前 Shadowrocket 配置，防护设置已停止。";
+
+"The selected profile's transport or encryption settings are not supported for automatic protection." = "当前配置的传输或加密设置暂不支持自动防护。";
+
+"The selected profile changed during detection. A fresh check is required." = "检测期间节点配置发生变化，需要重新检查。";
+
+"Connect Shadowrocket before automatic protection can be activated." = "请先连接 Shadowrocket，再启用自动防护。";
+
+"The active VPN route could not be confirmed. Protection setup is blocked." = "无法确认当前 VPN 路由，防护设置已停止。";
+
+"The tunnel exit check did not return valid evidence. Automatic detection will retry." = "隧道出口检查未返回有效证据，自动检测将重试。";
+
+"A unique live connection from the verified Shadowrocket provider could not be confirmed." = "无法从已验证的 Shadowrocket 提供程序确认唯一的活动节点连接。";
+
+"The VPN path changed during detection. A fresh check is required." = "检测期间 VPN 链路发生变化，需要重新检查。";
+"The selected node differs from the sealed bootstrap. Restore networking locally before approving a different node." = "当前所选节点与封锁状态下保存的启动节点不同。请先在本机恢复网络，再批准新节点。";
+
+"Automatic setup could not be completed. Check the protection status before continuing." = "自动设置未能完成，请先确认防护状态再继续使用。";
+
+"The risk provider retry window has not elapsed. Apps stay blocked until fresh evidence is available." = "风险服务的重试间隔尚未结束。在取得最新证据前，应用保持拦截。";
+
+"The risk provider address could not be verified through the tunnel. App traffic remains blocked." = "无法通过隧道验证风险服务地址，应用流量保持拦截。";
+
+"The risk provider did not return a verified HTTPS response. App traffic remains blocked." = "风险服务未返回经验证的 HTTPS 响应，应用流量保持拦截。";
+
+"The risk provider evidence could not be validated. App traffic remains blocked." = "无法验证风险服务返回的证据，应用流量保持拦截。";
+
+"Risk check deferred" = "风险检查等待重试";
+
+"Guardian settings changed during this operation. Check the current status and try again." = "操作期间守护设置发生变化，请查看当前状态后重试。";
+
+"Automatic protection is disabled. Enable it to resume detection and enforcement." = "自动防护已关闭。重新启用后才会恢复检测和拦截。";
