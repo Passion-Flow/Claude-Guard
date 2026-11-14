@@ -580,9 +580,24 @@ build_rules "$1"
         (root / "primary").unlink()
         expect("OPEN", reason="probe-ok")
 
-        # One whole failed round should be visible but should not load a locked ruleset.
+        # Two transport failures may recover inside the same concurrent round.
+        # Require both injected faults and a newer accepted observation while
+        # OPEN, rather than a transient reason that successful retries avoid.
+        injection_started = time.time()
         (root / "drop-next").write_text("2")
-        expect("OPEN", reason="probe-retry")
+        def recovered_after_faults():
+            current = status()
+            assert current[1] == 'OPEN', ('transient-fault-interrupted-traffic', current)
+            transfers = [json.loads(line) for line in (root / 'transfer-events').read_text().splitlines()]
+            injected = [row for row in transfers if row['at'] >= injection_started and row['outcome'] == 'injected-timeout']
+            if len(injected) != 2:
+                return False
+            last_fault = max(row['at'] for row in injected)
+            fresh_response = any(row['outcome'] == 'response' and row['at'] > last_fault for row in transfers)
+            proof = (runtime / 'evidence').read_text().strip().split('|')
+            return fresh_response and int(proof[4]) > int(last_fault)
+        until(recovered_after_faults)
+        assert (root / 'drop-next').read_text() == '0'
         assert "CG_TUNNEL" in (root / "rules").read_text()
         expect("OPEN", reason="probe-ok")
         assert runtime_journal.read_text().count("|LOCKED|") == prior_locks
